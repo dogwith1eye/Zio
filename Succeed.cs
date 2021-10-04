@@ -196,4 +196,17 @@ namespace Zio
 
         public ZIO<(int, int)> Run() => AsyncZIO.ZipPar(AsyncZIO);
     }
+
+    class StackSafety : ZIOApp<Unit>
+    {
+        static ZIO<Unit> MyProgram = 
+            ZIO.Succeed(() => 
+            {
+                Console.WriteLine("Howdy!");
+                return Unit();
+            }).Repeat(10);
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
+
 }

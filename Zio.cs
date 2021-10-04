@@ -65,9 +65,15 @@ namespace Zio
             
     }
 
+    // Stack Safety
+    // Execution Context
+    // Concurrency Safety
+    // Interruption
+    // Error Handling
+    // Environment
     // Declarative Encoding
     // ZIO<R, E, A>
-    // async
+    // Async
     interface ZIO<A> 
     {
         // continuation
@@ -88,16 +94,28 @@ namespace Zio
         ZIO<B> Map<B>(Func<A, B> f) => 
             this.FlatMap((a) => ZIO.SucceedNow(f(a)));
 
+        ZIO<Unit> Repeat(int n)
+        {
+            if (n <= 0) return ZIO.SucceedNow(Unit());
+            else return this.ZipRight(Repeat(n -1));
+        }
+
         ZIO<(A, B)> Zip<B>(ZIO<B> that) => 
-            from a in this
-            from b in that
-            select (a, b);
+            ZipWith(that, (a, b) => (a, b));
 
         ZIO<(A, B)> ZipPar<B>(ZIO<B> that) => 
             from f in this.Fork()
             from b in that
             from a in f.Join()
             select (a, b);
+        
+        ZIO<B> ZipRight<B>(ZIO<B> that) => 
+            ZipWith(that, (a, b) => b);
+
+        ZIO<C> ZipWith<B, C>(ZIO<B> that, Func<A, B, C> f) => 
+            from a in this
+            from b in that
+            select f(a, b);
     }
 
     class Succeed<A> : ZIO<A>
