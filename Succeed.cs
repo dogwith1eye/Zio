@@ -204,7 +204,7 @@ namespace Zio
             {
                 Console.WriteLine("Howdy!");
                 return Unit();
-            }).Repeat(10);
+            }).Repeat(10000);
 
         public ZIO<Unit> Run() => MyProgram;
     }

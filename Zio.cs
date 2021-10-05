@@ -55,7 +55,7 @@ namespace Zio
 
         public Unit Start()
         {
-            Task.Run(() => this.zio.Run((a) => {
+            Task.Run(() => this.zio.RunUnsafe((a) => {
                 this.maybeResult = Some(a);
                 this.callbacks.ForEach(callback => callback(a));
                 return Unit();
@@ -79,7 +79,53 @@ namespace Zio
         // continuation
         // callback
         // method A => Unit
-        Unit Run(Func<A, Unit> callback);
+        Unit RunUnsafe(Func<A, Unit> callback);
+        sealed Unit Run(Func<A, Unit> callback) 
+        {
+            var stack = new Stack<dynamic>();
+            dynamic currentZIO = this;
+            var loop = true;
+
+            Func<dynamic, Unit> Complete = (value) =>
+            {
+                if (stack.Count == 0)
+                {
+                    loop = false;
+                    callback(value);
+                }
+                else
+                {
+                    var cont = stack.Pop();
+                    Console.WriteLine("Pop:" + stack.Count);
+                    currentZIO = cont(value);
+                }
+                return Unit();
+            };
+
+            while (loop)
+            {
+                switch (currentZIO.Label)
+                {
+                    case "Succeed":
+                        Complete(currentZIO.Value);
+                        break;
+                    
+                    case "Effect":
+                        Complete(currentZIO.Thunk());
+                        break;
+
+                    case "FlatMap":
+                        stack.Push(currentZIO.Cont);
+                        Console.WriteLine("Push:" + stack.Count);
+                        currentZIO = currentZIO.Zio;
+                        break;
+
+                    default: 
+                        throw new Exception("Zio case does not match");
+                };
+            }
+            return Unit();
+        }
 
         ZIO<B> As<B>(B b) => 
             this.Map((_) => b);
@@ -96,8 +142,20 @@ namespace Zio
 
         ZIO<Unit> Repeat(int n)
         {
+            var count = n;
+            var result = ZIO.SucceedNow(Unit());
+            while (count > 0)
+            {
+                result = this.ZipRight<Unit>(result);
+                count -= 1;
+            }
+            return result;
+        }
+
+        ZIO<Unit> RepeatUnsafe(int n)
+        {
             if (n <= 0) return ZIO.SucceedNow(Unit());
-            else return this.ZipRight(Repeat(n -1));
+            else return this.ZipRight(RepeatUnsafe(n - 1));
         }
 
         ZIO<(A, B)> Zip<B>(ZIO<B> that) => 
@@ -120,43 +178,57 @@ namespace Zio
 
     class Succeed<A> : ZIO<A>
     {
-        private A value;
-        public Succeed(A value)
+        public string Label
         {
-            this.value = value;
+            get => "Succeed";
         }
 
-        public Unit Run(Func<A, Unit> callback)
-            => callback(this.value);
+        public A Value { get; }
+
+        public Succeed(A value)
+        {
+            this.Value = value;
+        }
+
+        public Unit RunUnsafe(Func<A, Unit> callback)
+            => callback(this.Value);
     }
 
     class Effect<A> : ZIO<A>
     {
-        private Func<A> f;
-        public Effect(Func<A> f)
+        public string Label
         {
-            this.f = f;
+            get => "Effect";
+        }
+        public Func<A> Thunk { get; }
+        public Effect(Func<A> thunk)
+        {
+            this.Thunk = thunk;
         }
 
-        public Unit Run(Func<A, Unit> callback)
-            => callback(this.f());
+        public Unit RunUnsafe(Func<A, Unit> callback)
+            => callback(this.Thunk());
     }
 
     class FlatMap<A, B> : ZIO<B>
     {
-        private ZIO<A> a;
-        private Func<A, ZIO<B>> f;
-        public FlatMap(ZIO<A> a, Func<A, ZIO<B>> f)
+        public string Label
         {
-            this.a = a;
-            this.f = f;
+            get => "FlatMap";
+        }
+        public ZIO<A> Zio { get; }
+        public Func<A, ZIO<B>> Cont { get; }
+        public FlatMap(ZIO<A> zio, Func<A, ZIO<B>> cont)
+        {
+            this.Zio = zio;
+            this.Cont = cont;
         }
 
-        public Unit Run(Func<B, Unit> callback)
+        public Unit RunUnsafe(Func<B, Unit> callback)
         {
-            return this.a.Run(a => 
+            return this.Zio.RunUnsafe(a => 
             {
-                return f(a).Run(callback);
+                return this.Cont(a).RunUnsafe(callback);
             });
         }
     }
@@ -169,7 +241,7 @@ namespace Zio
             this.register = register;
         }
 
-        public Unit Run(Func<A, Unit> callback) =>
+        public Unit RunUnsafe(Func<A, Unit> callback) =>
             this.register(callback);
     }
 
@@ -181,7 +253,7 @@ namespace Zio
             this.zio = zio;
         }
 
-        public Unit Run(Func<Fiber<A>, Unit> callback)
+        public Unit RunUnsafe(Func<Fiber<A>, Unit> callback)
         {
             var fiber = new FiberImpl<A>(zio);
             fiber.Start();
