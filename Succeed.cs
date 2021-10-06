@@ -208,4 +208,16 @@ namespace Zio
 
         public ZIO<Unit> Run() => MyProgram;
     }
+
+    class AsyncStackSafety : ZIOApp<Unit>
+    {
+        static ZIO<Unit> MyProgram = 
+            ZIO.Async<Unit>(complete => 
+            {
+                Console.WriteLine("Howdy!");
+                return complete(Unit());
+            }).Repeat(10000);
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
 }

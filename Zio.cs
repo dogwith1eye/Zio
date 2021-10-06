@@ -139,7 +139,11 @@ namespace Zio
                             {
                                 loop = false;
                                 Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
-                                currentZIO.Resume(resume);
+                                Func<Func<dynamic, Unit>, Unit> register = a =>
+                                {
+                                    return resume(ZIO.SucceedNow(a));
+                                };
+                                currentZIO.Register(register);
                             }
                             break;
 
