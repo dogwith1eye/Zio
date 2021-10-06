@@ -21,7 +21,6 @@ namespace Zio
                 Console.WriteLine($"The result was ${result}");
                 return Unit();
             });
-            Thread.Sleep(300);
         }
     }
 
@@ -219,5 +218,60 @@ namespace Zio
             }).Repeat(10000);
 
         public ZIO<Unit> Run() => MyProgram;
+    }
+
+    class ConcurrencyUhOh : ZIOApp<int>
+    {
+        // Expectations in synchronous world
+
+        // Thead #1
+        // get the old value of 0
+        // do some operation on it (0 + 1)
+        // set it to the new value (1)
+
+        // Thead #2
+        // get the old value of 1
+        // do some operation on it (1 + 1)
+        // set it to the new value (2)
+
+        // One possible order of execution
+        
+        // T1: get the old value of 0
+        // T1: do some operation of it (0 + 1)
+        // T2: get the old value of 0
+        // T1: set it to the new value (1)
+        // T2: do some operation of it (0 + 1)
+        // T1: set it to the new value (1)
+
+        // Expectations in atomic world
+
+        // Thead #1
+        // get the old value of 0
+        // do some operation on it (0 + 1)
+        // set it to the new value only if equal to old value (1)
+        // otherwise go back to first step
+
+        // Thead #2
+        // get the old value of 1
+        // do some operation on it (1 + 1)
+        // set it to the new value only if equal to the old value (2)
+        // otherwise go back to first step
+
+        // T1: get the old value of 0
+        // T1: do some operation of it (0 + 1)
+        // T2: get the old value of 0
+        // T1: set it to the new value (1) if it is 0 (what we got above)
+        // T2: do some operation of it (0 + 1)
+        // T1: set it to the new value (1) if it is 0 (what we got above) NO!IT WAS 1! RETRY!
+
+
+        static int i = 0;
+
+        static ZIO<int> ForkedZIO =
+            from _ in ZIO.Succeed(() => i += 1).Fork().Repeat(10000)
+            from value in ZIO.Succeed(() => i)
+            select value;
+
+        public ZIO<int> Run() => ForkedZIO;
     }
 }

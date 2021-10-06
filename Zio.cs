@@ -33,10 +33,78 @@ namespace Zio
 
     class FiberImpl<A> : Fiber<A>
     {
-        private ZIO<A> zio;
-        private Option<A> maybeResult;
+        interface FiberState {}
+        class Running : FiberState
+        {
+            public List<Func<A, Unit>> Callbacks { get; }
+            public Running(List<Func<A, Unit>> callbacks)
+            {
+                this.Callbacks = callbacks;
+            }
+        }
+        class Done : FiberState
+        {
+            public A Result { get; }
+            public Done(A result)
+            {
+                this.Result = result;
+            }
+        }
+        // CAS
+        // compare and swap
+        private Akka.Util.AtomicReference<FiberState> state = 
+            new Akka.Util.AtomicReference<FiberState>(new Running(new List<Func<A, Unit>>()));
 
-        private List<Func<A, Unit>> callbacks = new List<Func<A, Unit>>();
+        public Unit Complete(A result)
+        {
+            var loop = true;
+            while (loop)
+            {
+                var oldState = state.Value;
+                switch (oldState)
+                {
+                    case Running running:
+                        if (state.CompareAndSet(oldState, new Done(result)))
+                        {
+                            running.Callbacks.ForEach(callback => callback(result));
+                            loop = false;
+                        };
+                        break;
+                    case Done done:
+                        throw new Exception("Fiber being completed multiple times");
+                }
+            }
+            return Unit();
+        }
+
+        public Unit Await(Func<A, Unit> callback)
+        {
+            var loop = true;
+            while (loop)
+            {
+                var oldState = state.Value;
+                switch (oldState)
+                {
+                    case Running running:
+                        Console.WriteLine("running");
+                        running.Callbacks.Add(callback);
+                        Console.WriteLine(running.Callbacks.Count());
+                        var newState = new Running(running.Callbacks);
+                        loop = !state.CompareAndSet(oldState, newState);
+                        break;
+                    case Done done:
+                        Console.WriteLine("done");
+                        callback(done.Result);
+                        loop = false;
+                        break;
+                }
+            }
+            return Unit();
+        }
+
+        private ZIO<A> zio;
+        //private Option<A> maybeResult;
+        //private List<Func<A, Unit>> callbacks = new List<Func<A, Unit>>();
 
         public FiberImpl(ZIO<A> zio)
         {
@@ -44,22 +112,22 @@ namespace Zio
         }
 
         public ZIO<A> Join() =>
-            this.maybeResult.Match(
-                ()  => ZIO.Async<A>(complete => 
-                {
-                    this.callbacks.Add(complete);
-                    return Unit();
-                }),
-                (a) => ZIO.SucceedNow<A>(a)
-            );
+            ZIO.Async<A>(complete => 
+                Await(complete));
+            // this.maybeResult.Match(
+            //     ()  => ZIO.Async<A>(complete => 
+            //     {
+            //         this.callbacks.Add(complete);
+            //         return Unit();
+            //     }),
+            //     (a) => ZIO.SucceedNow<A>(a)
+            // );
 
         public Unit Start()
         {
-            Task.Run(() => this.zio.Run((a) => {
-                this.maybeResult = Some(a);
-                this.callbacks.ForEach(callback => callback(a));
-                return Unit();
-            }));
+            Task.Run(() => 
+                this.zio.Run(a => Complete(a))
+            );
             return Unit();
         }
             
@@ -95,7 +163,7 @@ namespace Zio
                 else
                 {
                     var cont = stack.Pop();
-                    Console.WriteLine("Pop:" + stack.Count);
+                    //Console.WriteLine("Pop:" + stack.Count);
                     currentZIO = cont(value);
                 }
                 return Unit();
@@ -123,7 +191,7 @@ namespace Zio
 
                         case "FlatMap":
                             stack.Push(currentZIO.Cont);
-                            Console.WriteLine("Push:" + stack.Count);
+                            //Console.WriteLine("Push:" + stack.Count);
                             currentZIO = currentZIO.Zio;
                             break;
 
