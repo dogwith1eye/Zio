@@ -65,7 +65,7 @@ namespace Zio
             
     }
 
-    // Stack Safety
+    // Stack Safety CHECK
     // Execution Context
     // Concurrency Safety
     // Interruption
@@ -79,7 +79,6 @@ namespace Zio
         // continuation
         // callback
         // method A => Unit
-        Unit RunUnsafe(Func<A, Unit> callback);
         sealed Unit Run(Func<A, Unit> callback) 
         {
             var stack = new Stack<dynamic>();
@@ -224,9 +223,6 @@ namespace Zio
         {
             this.Value = value;
         }
-
-        public Unit RunUnsafe(Func<A, Unit> callback)
-            => callback(this.Value);
     }
 
     class Effect<A> : ZIO<A>
@@ -240,9 +236,6 @@ namespace Zio
         {
             this.Thunk = thunk;
         }
-
-        public Unit RunUnsafe(Func<A, Unit> callback)
-            => callback(this.Thunk());
     }
 
     class FlatMap<A, B> : ZIO<B>
@@ -258,14 +251,6 @@ namespace Zio
             this.Zio = zio;
             this.Cont = cont;
         }
-
-        public Unit RunUnsafe(Func<B, Unit> callback)
-        {
-            return this.Zio.RunUnsafe(a => 
-            {
-                return this.Cont(a).RunUnsafe(callback);
-            });
-        }
     }
 
     class Async<A> : ZIO<A>
@@ -279,14 +264,6 @@ namespace Zio
         {
             this.Register = register;
         }
-        public Unit Resume(Func<dynamic, Unit> resume) =>
-            this.Register(a =>
-            {
-                return resume(ZIO.SucceedNow(a));
-            });
-
-        public Unit RunUnsafe(Func<A, Unit> callback) =>
-            this.Register(callback);
     }
 
     class Fork<A> : ZIO<Fiber<A>>
@@ -303,13 +280,6 @@ namespace Zio
 
         public FiberImpl<A> CreateFiber() =>
             new FiberImpl<A>(Zio);
-
-        public Unit RunUnsafe(Func<Fiber<A>, Unit> callback)
-        {
-            var fiber = CreateFiber();
-            fiber.Start();
-            return callback(fiber);
-        }
     }
 
     static class ZIO
