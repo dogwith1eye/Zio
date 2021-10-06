@@ -57,28 +57,33 @@ namespace Zio
 
         public Unit Complete(A result)
         {
+            Console.WriteLine("Complete with result:" + result);
             var loop = true;
+            var toComplete = new List<Func<A, Unit>>();
             while (loop)
             {
                 var oldState = state.Value;
                 switch (oldState)
                 {
                     case Running running:
-                        if (state.CompareAndSet(oldState, new Done(result)))
-                        {
-                            running.Callbacks.ForEach(callback => callback(result));
-                            loop = false;
-                        };
+                        Console.WriteLine("Complete Pending callbacks count:" + running.Callbacks.Count());
+                        toComplete = running.Callbacks;
+                        var tryAgain = !state.CompareAndSet(oldState, new Done(result));
+                        Console.WriteLine("Complete tryAgain:" + tryAgain);
+                        loop = tryAgain;
                         break;
                     case Done done:
                         throw new Exception("Fiber being completed multiple times");
                 }
             }
+            toComplete.ForEach(callback => callback(result));
+            
             return Unit();
         }
 
         public Unit Await(Func<A, Unit> callback)
         {
+            Console.WriteLine("Await with our callback");
             var loop = true;
             while (loop)
             {
@@ -86,14 +91,14 @@ namespace Zio
                 switch (oldState)
                 {
                     case Running running:
-                        Console.WriteLine("running");
+                        Console.WriteLine("Await already running Count:" + running.Callbacks.Count());
                         running.Callbacks.Add(callback);
-                        Console.WriteLine(running.Callbacks.Count());
                         var newState = new Running(running.Callbacks);
                         loop = !state.CompareAndSet(oldState, newState);
+                        Console.WriteLine("Running TryAgain:" + loop);
                         break;
                     case Done done:
-                        Console.WriteLine("done");
+                        Console.WriteLine("Await Done result:" + done.Result);
                         callback(done.Result);
                         loop = false;
                         break;
@@ -112,8 +117,13 @@ namespace Zio
         }
 
         public ZIO<A> Join() =>
-            ZIO.Async<A>(complete => 
-                Await(complete));
+            ZIO.Async<A>(callback => 
+            {
+                Console.WriteLine("Join Callback");
+                Await(callback);
+                Console.WriteLine("Join After Await");
+                return Unit();
+            });
             // this.maybeResult.Match(
             //     ()  => ZIO.Async<A>(complete => 
             //     {
@@ -125,12 +135,17 @@ namespace Zio
 
         public Unit Start()
         {
-            Task.Run(() => 
-                this.zio.Run(a => Complete(a))
-            );
+            Task.Run(() =>
+            { 
+                this.zio.Run(a => 
+                {
+                    Console.WriteLine("Start Run Callback");
+                    Complete(a);
+                    return Unit();
+                });
+            });
             return Unit();
-        }
-            
+        }   
     }
 
     // Stack Safety CHECK
@@ -163,14 +178,15 @@ namespace Zio
                 else
                 {
                     var cont = stack.Pop();
-                    //Console.WriteLine("Pop:" + stack.Count);
+                    Console.WriteLine("Pop:" + stack.Count);
                     currentZIO = cont(value);
                 }
                 return Unit();
             };
 
-            Unit Resume()
+            Unit Resume(dynamic nextZIO)
             {
+                currentZIO = nextZIO;
                 loop = true;
                 return DoLoop();
             };
@@ -191,7 +207,7 @@ namespace Zio
 
                         case "FlatMap":
                             stack.Push(currentZIO.Cont);
-                            //Console.WriteLine("Push:" + stack.Count);
+                            Console.WriteLine("Push:" + stack.Count);
                             currentZIO = currentZIO.Zio;
                             break;
 
@@ -204,12 +220,14 @@ namespace Zio
                             else
                             {
                                 loop = false;
-                                Func<Func<dynamic, Unit>, Unit> register = a =>
-                                {
-                                    currentZIO = ZIO.SucceedNow(a);
-                                    return Resume();
-                                };
-                                currentZIO.Register(register);
+                                // Func<Func<dynamic, Unit>, Unit> register = a =>
+                                // {
+                                //     currentZIO = ZIO.SucceedNow(a);
+                                //     return Resume();
+                                // };
+                                // currentZIO.Register(register);
+                                Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
+                                currentZIO.Resume(resume);
                             }
                             break;
 
@@ -332,6 +350,12 @@ namespace Zio
         {
             this.Register = register;
         }
+
+        public Unit Resume(Func<dynamic, Unit> resume) =>
+            this.Register(a =>
+            {
+                return resume(ZIO.SucceedNow(a));
+            });
     }
 
     class Fork<A> : ZIO<Fiber<A>>
@@ -358,6 +382,5 @@ namespace Zio
             new Effect<A>(value);
         internal static ZIO<A> SucceedNow<A>(A value) => 
             new Succeed<A>(value);
-
     }
 }
