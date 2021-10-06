@@ -102,9 +102,8 @@ namespace Zio
                 return Unit();
             };
 
-            Unit Resume(dynamic nextZIO)
+            Unit Resume()
             {
-                currentZIO = nextZIO;
                 loop = true;
                 return DoLoop();
             };
@@ -138,10 +137,10 @@ namespace Zio
                             else
                             {
                                 loop = false;
-                                Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
                                 Func<Func<dynamic, Unit>, Unit> register = a =>
                                 {
-                                    return resume(ZIO.SucceedNow(a));
+                                    currentZIO = ZIO.SucceedNow(a);
+                                    return Resume();
                                 };
                                 currentZIO.Register(register);
                             }
