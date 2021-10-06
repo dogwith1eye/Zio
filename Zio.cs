@@ -55,7 +55,7 @@ namespace Zio
 
         public Unit Start()
         {
-            Task.Run(() => this.zio.RunUnsafe((a) => {
+            Task.Run(() => this.zio.Run((a) => {
                 this.maybeResult = Some(a);
                 this.callbacks.ForEach(callback => callback(a));
                 return Unit();
@@ -86,7 +86,7 @@ namespace Zio
             dynamic currentZIO = this;
             var loop = true;
 
-            Func<dynamic, Unit> Complete = (value) =>
+            Unit Complete(dynamic value)
             {
                 if (stack.Count == 0)
                 {
@@ -102,29 +102,61 @@ namespace Zio
                 return Unit();
             };
 
-            while (loop)
+            Unit Resume(dynamic nextZIO)
             {
-                switch (currentZIO.Label)
+                currentZIO = nextZIO;
+                loop = true;
+                return DoLoop();
+            };
+
+            Unit DoLoop()
+            {
+                while (loop)
                 {
-                    case "Succeed":
-                        Complete(currentZIO.Value);
-                        break;
-                    
-                    case "Effect":
-                        Complete(currentZIO.Thunk());
-                        break;
+                    switch (currentZIO.Label)
+                    {
+                        case "Succeed":
+                            Complete(currentZIO.Value);
+                            break;
+                        
+                        case "Effect":
+                            Complete(currentZIO.Thunk());
+                            break;
 
-                    case "FlatMap":
-                        stack.Push(currentZIO.Cont);
-                        Console.WriteLine("Push:" + stack.Count);
-                        currentZIO = currentZIO.Zio;
-                        break;
+                        case "FlatMap":
+                            stack.Push(currentZIO.Cont);
+                            Console.WriteLine("Push:" + stack.Count);
+                            currentZIO = currentZIO.Zio;
+                            break;
 
-                    default: 
-                        throw new Exception("Zio case does not match");
-                };
-            }
-            return Unit();
+                        case "Async":
+                            if (stack.Count == 0)
+                            {
+                                loop = false;
+                                currentZIO.Register(callback);
+                            }
+                            else
+                            {
+                                loop = false;
+                                Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
+                                currentZIO.Resume(resume);
+                            }
+                            break;
+
+                        case "Fork":
+                            var fiber = currentZIO.CreateFiber();
+                            fiber.Start();
+                            Complete(fiber);
+                            break;
+
+                        default: 
+                            throw new Exception("Zio case does not match");
+                    };
+                }
+                return Unit();
+            };
+
+            return DoLoop();
         }
 
         ZIO<B> As<B>(B b) => 
@@ -235,27 +267,43 @@ namespace Zio
 
     class Async<A> : ZIO<A>
     {
-        private Func<Func<A, Unit>, Unit> register;
+        public string Label
+        {
+            get => "Async";
+        }
+        public Func<Func<A, Unit>, Unit> Register { get; }
         public Async(Func<Func<A, Unit>, Unit> register)
         {
-            this.register = register;
+            this.Register = register;
         }
+        public Unit Resume(Func<dynamic, Unit> resume) =>
+            this.Register(a =>
+            {
+                return resume(ZIO.SucceedNow(a));
+            });
 
         public Unit RunUnsafe(Func<A, Unit> callback) =>
-            this.register(callback);
+            this.Register(callback);
     }
 
     class Fork<A> : ZIO<Fiber<A>>
     {
-        private ZIO<A> zio;
+        public string Label
+        {
+            get => "Fork";
+        }
+        public ZIO<A> Zio { get; }
         public Fork(ZIO<A> zio)
         {
-            this.zio = zio;
+            this.Zio = zio;
         }
+
+        public FiberImpl<A> CreateFiber() =>
+            new FiberImpl<A>(Zio);
 
         public Unit RunUnsafe(Func<Fiber<A>, Unit> callback)
         {
-            var fiber = new FiberImpl<A>(zio);
+            var fiber = CreateFiber();
             fiber.Start();
             return callback(fiber);
         }

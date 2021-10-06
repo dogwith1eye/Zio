@@ -7,7 +7,7 @@ namespace Zio
     {
         static void Main(string[] args)
         {
-            ZIOApp<Unit> app = new StackSafety();
+            ZIOApp<(int, int)> app = new ZipPar();
             app.Main(args);
         }
     }
