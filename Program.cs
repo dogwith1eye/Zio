@@ -7,7 +7,7 @@ namespace Zio
     {
         static void Main(string[] args)
         {
-            ZIOApp<int> app = new ConcurrencyUhOh();
+            ZIOApp<Unit> app = new AsyncStackSafety();
             app.Main(args);
         }
     }

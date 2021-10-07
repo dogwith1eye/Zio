@@ -5,7 +5,6 @@ using static LaYumba.Functional.F;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Collections.Generic;
-using System.Threading;
 
 namespace Zio
 {
@@ -157,7 +156,6 @@ namespace Zio
         // method A => Unit
         sealed Unit Run(Func<A, Unit> callback) 
         {
-            var mre = new ManualResetEvent(false);
             var stack = new Stack<dynamic>();
             dynamic currentZIO = this;
             var loop = true;
@@ -181,53 +179,59 @@ namespace Zio
             Unit Resume(dynamic nextZIO)
             {
                 currentZIO = nextZIO;
-                mre.Set();
+                loop = true;
+                DoLoop();
                 return Unit();
             };
 
-            while (loop)
+            Unit DoLoop()
             {
-                switch (currentZIO.Label)
+                while (loop)
                 {
-                    case "Succeed":
-                        Complete(currentZIO.Value);
-                        break;
-                    
-                    case "Effect":
-                        Complete(currentZIO.Thunk());
-                        break;
+                    switch (currentZIO.Label)
+                    {
+                        case "Succeed":
+                            Complete(currentZIO.Value);
+                            break;
+                        
+                        case "Effect":
+                            Complete(currentZIO.Thunk());
+                            break;
 
-                    case "FlatMap":
-                        stack.Push(currentZIO.Cont);
-                        //Console.WriteLine("Push:" + stack.Count);
-                        currentZIO = currentZIO.Zio;
-                        break;
+                        case "FlatMap":
+                            stack.Push(currentZIO.Cont);
+                            //Console.WriteLine("Push:" + stack.Count);
+                            currentZIO = currentZIO.Zio;
+                            break;
 
-                    case "Async":
-                        if (stack.Count == 0)
-                        {
-                            loop = false;
-                            currentZIO.Register(callback);
-                        }
-                        else
-                        {
-                            Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
-                            currentZIO.Resume(resume);
-                            mre.WaitOne();
-                        }
-                        break;
+                        case "Async":
+                            if (stack.Count == 0)
+                            {
+                                loop = false;
+                                currentZIO.Register(callback);
+                            }
+                            else
+                            {
+                                loop = false;
+                                Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
+                                currentZIO.Resume(resume);
+                            }
+                            break;
 
-                    case "Fork":
-                        var fiber = currentZIO.CreateFiber();
-                        fiber.Start();
-                        Complete(fiber);
-                        break;
+                        case "Fork":
+                            var fiber = currentZIO.CreateFiber();
+                            fiber.Start();
+                            Complete(fiber);
+                            break;
 
-                    default: 
-                        throw new Exception("Zio case does not match");
-                };
+                        default: 
+                            throw new Exception("Zio case does not match");
+                    };
+                }
+                return Unit();
             }
-            return Unit();
+            
+            return DoLoop();
         }
 
         ZIO<B> As<B>(B b) => 
