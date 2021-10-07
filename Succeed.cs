@@ -22,7 +22,7 @@ namespace Zio
                 return Unit();
             });
             Console.WriteLine("Done with Main");
-            Thread.Sleep(1000);
+            Thread.Sleep(5000);
         }
     }
 
@@ -170,12 +170,10 @@ namespace Zio
         static ZIO<string> ForkedZIO =
             from fiber1 in AsyncZIO.Fork()
             from fiber2 in AsyncZIO.Fork()
-            from fiber3 in AsyncZIO.Fork()
             from _ in  WriteLine("Nice")
             from i1 in fiber1.Join()
             from i2 in fiber2.Join()
-            from i3 in fiber3.Join()
-            select $"My beautiful ints {i1} {i2} {i3}";
+            select $"My beautiful ints {i1} {i2}";
 
         public ZIO<string> Run() => ForkedZIO;
     }
@@ -271,8 +269,20 @@ namespace Zio
 
         static int i = 0;
 
+        static ZIO<Unit> Increment = 
+            ZIO.Succeed<Unit>(() =>
+            {
+                i+=1;
+                Console.WriteLine(i);
+                return Unit();
+            });
+
+        // static ZIO<int> ForkedZIO =
+        //     from _ in Increment.Fork().Repeat(1000)
+        //     from value in ZIO.Succeed(() => i)
+        //     select value;
         static ZIO<int> ForkedZIO =
-            from _ in ZIO.Succeed(() => i += 1).Fork().Repeat(1000)
+            from _ in Increment.Fork().Repeat(1000)
             from value in ZIO.Succeed(() => i)
             select value;
 
