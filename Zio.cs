@@ -156,7 +156,7 @@ namespace Zio
         // method A => Unit
         sealed Unit Run(Func<A, Unit> callback) 
         {
-            //Console.WriteLine("Run Start");
+            Console.WriteLine("Run Start");
             var stack = new Stack<dynamic>();
             dynamic currentZIO = this;
             var loop = true;
@@ -171,7 +171,7 @@ namespace Zio
                 else
                 {
                     var cont = stack.Pop();
-                    //Console.WriteLine("Pop:" + stack.Count);
+                    Console.WriteLine("Pop:" + stack.Count);
                     currentZIO = cont(value);
                 }
                 return Unit();
@@ -204,7 +204,7 @@ namespace Zio
 
                         case "FlatMap":
                             stack.Push(currentZIO.Cont);
-                            //Console.WriteLine("Push:" + stack.Count);
+                            Console.WriteLine("Push:" + stack.Count);
                             currentZIO = currentZIO.Zio;
                             break;
 
@@ -235,7 +235,7 @@ namespace Zio
             }
             
             DoLoop();
-            //Console.WriteLine("Run End");
+            Console.WriteLine("Run End");
             return Unit();
         }
 

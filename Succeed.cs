@@ -162,14 +162,44 @@ namespace Zio
         static ZIO<int> AsyncZIO = 
             ZIO.Async<int>((complete) => 
             {
-                Console.WriteLine("Async Beginneth!");
+                Console.WriteLine("Howdy!");
                 Thread.Sleep(500);
+                Console.WriteLine("Partner!");
                 return complete(new Random().Next(999));
             });
 
         static ZIO<string> ForkedZIO =
             from fiber1 in AsyncZIO.Fork()
             from fiber2 in AsyncZIO.Fork()
+            from _ in  WriteLine("Nice")
+            from i1 in fiber1.Join()
+            from i2 in fiber2.Join()
+            select $"My beautiful ints {i1} {i2}";
+
+        public ZIO<string> Run() => ForkedZIO;
+    }
+
+    class ForkedSync : ZIOApp<string>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        // spill our guts
+        static ZIO<int> SyncZIO = 
+            ZIO.Succeed<int>(() => 
+            {
+                Console.WriteLine("Howdy!");
+                Thread.Sleep(5000);
+                Console.WriteLine("Partner!");
+                return new Random().Next(999);
+            });
+
+        static ZIO<string> ForkedZIO =
+            from fiber1 in SyncZIO.Fork()
+            from fiber2 in SyncZIO.Fork()
             from _ in  WriteLine("Nice")
             from i1 in fiber1.Join()
             from i2 in fiber2.Join()
@@ -198,6 +228,26 @@ namespace Zio
         public ZIO<(int, int)> Run() => AsyncZIO.ZipPar(AsyncZIO);
     }
 
+    class ZipParSucceed : ZIOApp<(int, int)>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        // spill our guts
+        static ZIO<int> SyncZIO = 
+            ZIO.Succeed<int>(() => 
+            {
+                Console.WriteLine("Sync Beginneth!");
+                Thread.Sleep(200);
+                return new Random().Next(999);
+            });
+
+        public ZIO<(int, int)> Run() => SyncZIO.ZipPar(SyncZIO);
+    }
+
     class StackSafety : ZIOApp<Unit>
     {
         static ZIO<Unit> MyProgram = 
@@ -216,10 +266,8 @@ namespace Zio
             ZIO.Async<Unit>(complete => 
             {
                 Console.WriteLine("Howdy!");
-                Thread.Sleep(10);
-                Console.WriteLine("Partner!");
                 return complete(Unit());
-            }).Repeat(5000);
+            }).Repeat(10000);
 
         public ZIO<Unit> Run() => MyProgram;
     }

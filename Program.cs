@@ -7,7 +7,7 @@ namespace Zio
     {
         static void Main(string[] args)
         {
-            ZIOApp<Unit> app = new AsyncStackSafety();
+            ZIOApp<string> app = new ForkedSync();
             app.Main(args);
         }
     }
