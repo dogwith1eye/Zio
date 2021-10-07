@@ -142,12 +142,33 @@ namespace Zio
         static ZIO<int> AsyncZIO = 
             ZIO.Async<int>((complete) => 
             {
-                Console.WriteLine("Async Beginneth!");
-                Thread.Sleep(200);
-                return complete(new Random().Next(999));
+                Console.WriteLine("Async Start");
+                Thread.Sleep(1000);
+                complete(new Random().Next(999));
+                Console.WriteLine("Async End");
+                return Unit();
             });
 
         public ZIO<int> Run() => AsyncZIO;
+    }
+
+    class Async2 : ZIOApp<int>
+    {
+        // spill our guts
+        static ZIO<int> AsyncZIO = 
+            ZIO.Async<int>((complete) => 
+            {
+                Console.WriteLine("Async Start");
+                Thread.Sleep(1000);
+                complete(new Random().Next(999));
+                Console.WriteLine("Async End");
+                return Unit();
+            });
+
+        public ZIO<int> Run() => 
+            from a in AsyncZIO
+            from b in AsyncZIO
+            select b;
     }
 
     class Forked : ZIOApp<string>

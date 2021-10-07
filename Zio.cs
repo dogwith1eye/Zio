@@ -171,7 +171,7 @@ namespace Zio
                 else
                 {
                     var cont = stack.Pop();
-                    Console.WriteLine("Pop:" + stack.Count);
+                    //Console.WriteLine("Pop:" + stack.Count);
                     currentZIO = cont(value);
                 }
                 return Unit();
@@ -179,12 +179,9 @@ namespace Zio
 
             Unit Resume(dynamic nextZIO)
             {
-                Task.Run(() =>
-                {
-                    currentZIO = nextZIO;
-                    loop = true;
-                    DoLoop();
-                });
+                currentZIO = nextZIO;
+                loop = true;
+                DoLoop();
                 return Unit();
             };
 
@@ -204,16 +201,18 @@ namespace Zio
 
                         case "FlatMap":
                             stack.Push(currentZIO.Cont);
-                            Console.WriteLine("Push:" + stack.Count);
+                            //Console.WriteLine("Push:" + stack.Count);
                             currentZIO = currentZIO.Zio;
                             break;
 
                         case "Async":
                             loop = false;
+                            // continue with the callback the user provided
                             if (stack.Count == 0)
-                            {
+                            {    
                                 currentZIO.Register(callback);
                             }
+                            // stack not empty so continue with our run loop
                             else
                             {
                                 Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
