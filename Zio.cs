@@ -156,6 +156,7 @@ namespace Zio
         // method A => Unit
         sealed Unit Run(Func<A, Unit> callback) 
         {
+            //Console.WriteLine("Run Start");
             var stack = new Stack<dynamic>();
             dynamic currentZIO = this;
             var loop = true;
@@ -178,9 +179,12 @@ namespace Zio
 
             Unit Resume(dynamic nextZIO)
             {
-                currentZIO = nextZIO;
-                loop = true;
-                DoLoop();
+                Task.Run(() =>
+                {
+                    currentZIO = nextZIO;
+                    loop = true;
+                    DoLoop();
+                });
                 return Unit();
             };
 
@@ -205,14 +209,13 @@ namespace Zio
                             break;
 
                         case "Async":
+                            loop = false;
                             if (stack.Count == 0)
                             {
-                                loop = false;
                                 currentZIO.Register(callback);
                             }
                             else
                             {
-                                loop = false;
                                 Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
                                 currentZIO.Resume(resume);
                             }
@@ -231,7 +234,9 @@ namespace Zio
                 return Unit();
             }
             
-            return DoLoop();
+            DoLoop();
+            //Console.WriteLine("Run End");
+            return Unit();
         }
 
         ZIO<B> As<B>(B b) => 

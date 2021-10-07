@@ -216,8 +216,10 @@ namespace Zio
             ZIO.Async<Unit>(complete => 
             {
                 Console.WriteLine("Howdy!");
+                Thread.Sleep(10);
+                Console.WriteLine("Partner!");
                 return complete(Unit());
-            }).Repeat(10000);
+            }).Repeat(5000);
 
         public ZIO<Unit> Run() => MyProgram;
     }
