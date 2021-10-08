@@ -22,7 +22,6 @@ namespace Zio
                 return Unit();
             });
             Console.WriteLine("Done with Main");
-            Thread.Sleep(5000);
         }
     }
 

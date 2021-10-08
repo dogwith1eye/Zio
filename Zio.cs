@@ -180,8 +180,8 @@ namespace Zio
             Unit Resume(dynamic nextZIO)
             {
                 currentZIO = nextZIO;
-                loop = true;
-                DoLoop();
+                //loop = true;
+                //DoLoop();
                 return Unit();
             };
 
@@ -206,10 +206,10 @@ namespace Zio
                             break;
 
                         case "Async":
-                            loop = false;
                             // continue with the callback the user provided
                             if (stack.Count == 0)
-                            {    
+                            {
+                                loop = false;    
                                 currentZIO.Register(callback);
                             }
                             // stack not empty so continue with our run loop
