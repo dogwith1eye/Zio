@@ -116,20 +116,6 @@ namespace Zio
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join After Await");
                 return Unit();
             });
-
-        // public Unit Start()
-        // {
-        //     Task.Run(() =>
-        //     { 
-        //         this.zio.Run(a => 
-        //         {
-        //             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Result:{a}");
-        //             Complete(a);
-        //             return Unit();
-        //         });
-        //     });
-        //     return Unit();
-        // }   
  
         dynamic currentZIO = null;
         private Stack<dynamic> stack = new Stack<dynamic>();
@@ -221,114 +207,9 @@ namespace Zio
         }
     }
 
-    class FiberImpl<A> : Fiber<A>
-    {
-        interface FiberState {}
-        class Running : FiberState
-        {
-            public List<Func<A, Unit>> Callbacks { get; }
-            public Running(List<Func<A, Unit>> callbacks)
-            {
-                this.Callbacks = callbacks;
-            }
-        }
-        class Done : FiberState
-        {
-            public A Result { get; }
-            public Done(A result)
-            {
-                this.Result = result;
-            }
-        }
-        // CAS
-        // compare and swap
-        private Akka.Util.AtomicReference<FiberState> state = 
-            new Akka.Util.AtomicReference<FiberState>(new Running(new List<Func<A, Unit>>()));
-
-        public Unit Complete(A result)
-        {
-            var loop = true;
-            var toComplete = new List<Func<A, Unit>>();
-            while (loop)
-            {
-                var oldState = state.Value;
-                switch (oldState)
-                {
-                    case Running running:
-                        //Console.WriteLine("Complete Pending callbacks count:" + running.Callbacks.Count());
-                        toComplete = running.Callbacks;
-                        var tryAgain = !state.CompareAndSet(oldState, new Done(result));
-                        //Console.WriteLine("Complete tryAgain:" + tryAgain);
-                        loop = tryAgain;
-                        break;
-                    case Done done:
-                        throw new Exception("Fiber being completed multiple times");
-                }
-            }
-            toComplete.ForEach(callback => callback(result));
-            
-            return Unit();
-        }
-
-        public Unit Await(Func<A, Unit> callback)
-        {
-            //Console.WriteLine("Await with our callback");
-            var loop = true;
-            while (loop)
-            {
-                var oldState = state.Value;
-                switch (oldState)
-                {
-                    case Running running:
-                        //Console.WriteLine("Await already running Count:" + running.Callbacks.Count());
-                        running.Callbacks.Add(callback);
-                        var newState = new Running(running.Callbacks);
-                        loop = !state.CompareAndSet(oldState, newState);
-                        Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Register");
-                        break;
-                    case Done done:
-                        Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Done");
-                        callback(done.Result);
-                        loop = false;
-                        break;
-                }
-            }
-            return Unit();
-        }
-
-        private ZIO<A> zio;
-
-        public FiberImpl(ZIO<A> zio)
-        {
-            this.zio = zio;
-        }
-
-        public ZIO<A> Join() =>
-            ZIO.Async<A>(callback => 
-            {
-                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Before Await");
-                Await(callback);
-                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join After Await");
-                return Unit();
-            });
-
-        // public Unit Start()
-        // {
-        //     Task.Run(() =>
-        //     { 
-        //         this.zio.Run(a => 
-        //         {
-        //             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Result:{a}");
-        //             Complete(a);
-        //             return Unit();
-        //         });
-        //     });
-        //     return Unit();
-        // }   
-    }
-
     // Declarative Encoding CHECK
-    // Stack Safety CHECK
+    // Flatmap Stack Safety CHECK
+    // Async Stack Safety
     // Concurrency Safety CHECK
     // Custom Execution Context
     // Interruption
