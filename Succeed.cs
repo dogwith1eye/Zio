@@ -11,14 +11,11 @@ namespace Zio
 
         void Main(string[] args)
         {
-            this.Run().Run(result => 
-            {
-                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} The result was ${result}");
-                return Unit();
-            });
-            Console.WriteLine("Done with Main");
+            var result = this.Run().UnsafeRunSync();
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} The result was ${result}");
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Done with Main");
             Thread.Sleep(5000);
-            Console.WriteLine("Done with Main Sleep");
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Done with Main Sleep");
         }
     }
 
@@ -26,8 +23,6 @@ namespace Zio
     {
         public static Person Peter = new Person("Peter", 88);
     }
-
-    
 
     class SucceedNow : ZIOApp<Person>
     {
@@ -295,7 +290,7 @@ namespace Zio
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine("Async Beginneth!");
-                Thread.Sleep(200);
+                Thread.Sleep(1000);
                 return complete(new Random().Next(999));
             });
 
