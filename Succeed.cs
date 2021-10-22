@@ -341,6 +341,18 @@ namespace Zio
         public ZIO<Unit> Run() => MyProgram;
     }
 
+    class AsyncStackSafetyFork : ZIOApp<Unit>
+    {
+        static ZIO<Unit> MyProgram = 
+            ZIO.Async<Unit>(complete => 
+            {
+                Console.WriteLine("Howdy!");
+                return complete(Unit());
+            }).Fork().Repeat(10000);
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
+
     class ConcurrencyUhOh : ZIOApp<int>
     {
         // Expectations in synchronous world
