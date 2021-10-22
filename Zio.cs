@@ -5,6 +5,7 @@ using static LaYumba.Functional.F;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Zio
 {
@@ -57,7 +58,6 @@ namespace Zio
 
         public Unit Complete(A result)
         {
-            //Console.WriteLine("Complete with result:" + result);
             var loop = true;
             var toComplete = new List<Func<A, Unit>>();
             while (loop)
@@ -95,10 +95,10 @@ namespace Zio
                         running.Callbacks.Add(callback);
                         var newState = new Running(running.Callbacks);
                         loop = !state.CompareAndSet(oldState, newState);
-                        //Console.WriteLine("Running TryAgain:" + loop);
+                        Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Register");
                         break;
                     case Done done:
-                        //Console.WriteLine("Await Done result:" + done.Result);
+                        Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Done");
                         callback(done.Result);
                         loop = false;
                         break;
@@ -108,8 +108,6 @@ namespace Zio
         }
 
         private ZIO<A> zio;
-        //private Option<A> maybeResult;
-        //private List<Func<A, Unit>> callbacks = new List<Func<A, Unit>>();
 
         public FiberImpl(ZIO<A> zio)
         {
@@ -119,9 +117,9 @@ namespace Zio
         public ZIO<A> Join() =>
             ZIO.Async<A>(callback => 
             {
-                //Console.WriteLine("Join Callback");
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Before Await");
                 Await(callback);
-                //Console.WriteLine("Join After Await");
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join After Await");
                 return Unit();
             });
 
@@ -131,7 +129,7 @@ namespace Zio
             { 
                 this.zio.Run(a => 
                 {
-                    //Console.WriteLine("Start Run Callback");
+                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Result:{a}");
                     Complete(a);
                     return Unit();
                 });
@@ -140,13 +138,14 @@ namespace Zio
         }   
     }
 
+    // Declarative Encoding CHECK
     // Stack Safety CHECK
+    // Concurrency Safety CHECK
     // Execution Context
-    // Concurrency Safety
     // Interruption
     // Error Handling
     // Environment
-    // Declarative Encoding
+    
     // ZIO<R, E, A>
     // Async
     interface ZIO<A> 
@@ -156,13 +155,14 @@ namespace Zio
         // method A => Unit
         sealed Unit Run(Func<A, Unit> callback) 
         {
-            Console.WriteLine("Run Start");
+            //Console.WriteLine("Run Start");
             var stack = new Stack<dynamic>();
             dynamic currentZIO = this;
             var loop = true;
 
             Unit Complete(dynamic value)
             {
+                //Console.WriteLine(value);
                 if (stack.Count == 0)
                 {
                     loop = false;
@@ -179,9 +179,10 @@ namespace Zio
 
             Unit Resume(dynamic nextZIO)
             {
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Resume");
                 currentZIO = nextZIO;
-                //loop = true;
-                //DoLoop();
+                loop = true;
+                DoLoop();
                 return Unit();
             };
 
@@ -206,17 +207,22 @@ namespace Zio
                             break;
 
                         case "Async":
-                            // continue with the callback the user provided
+                            // we are always done with handling the run loop on the current thread 
+                            loop = false;
+                            // continue with the callback the user provided on the current thread
                             if (stack.Count == 0)
-                            {
-                                loop = false;    
+                            {      
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start");  
                                 currentZIO.Register(callback);
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End");
                             }
-                            // stack not empty so continue with our run loop
+                            // stack not empty so continue with our run loop on the thread left doing work
                             else
                             {
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start {stack.Count()}");
                                 Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
                                 currentZIO.Resume(resume);
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End {stack.Count()}");
                             }
                             break;
 
@@ -234,7 +240,7 @@ namespace Zio
             }
             
             DoLoop();
-            Console.WriteLine("Run End");
+            //Console.WriteLine("Run End Count:" + stack.Count());
             return Unit();
         }
 

@@ -5,11 +5,6 @@ using System.Threading;
 
 namespace Zio
 {
-    record Person(string name, int age)
-    {
-        public static Person Peter = new Person("Peter", 88);
-    }
-
     interface ZIOApp<T> 
     {
         ZIO<T> Run();
@@ -18,12 +13,21 @@ namespace Zio
         {
             this.Run().Run(result => 
             {
-                Console.WriteLine($"The result was ${result}");
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} The result was ${result}");
                 return Unit();
             });
             Console.WriteLine("Done with Main");
+            Thread.Sleep(5000);
+            Console.WriteLine("Done with Main Sleep");
         }
     }
+
+    record Person(string name, int age)
+    {
+        public static Person Peter = new Person("Peter", 88);
+    }
+
+    
 
     class SucceedNow : ZIOApp<Person>
     {
@@ -182,16 +186,27 @@ namespace Zio
         static ZIO<int> AsyncZIO = 
             ZIO.Async<int>((complete) => 
             {
-                Console.WriteLine("Howdy!");
-                Thread.Sleep(500);
-                Console.WriteLine("Partner!");
-                return complete(new Random().Next(999));
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
+                Thread.Sleep(2000);
+                complete(new Random().Next(999));
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client End");
+                return Unit();
+            });
+
+        static ZIO<int> AsyncZIO2 = 
+            ZIO.Async<int>((complete) => 
+            {
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
+                Thread.Sleep(3000);
+                complete(new Random().Next(999));
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client End");
+                return Unit();
             });
 
         static ZIO<string> ForkedZIO =
             from fiber1 in AsyncZIO.Fork()
             from fiber2 in AsyncZIO.Fork()
-            from _ in  WriteLine("Nice")
+            from _ in  WriteLine($"{Thread.CurrentThread.ManagedThreadId} Nice")
             from i1 in fiber1.Join()
             from i2 in fiber2.Join()
             select $"My beautiful ints {i1} {i2}";
@@ -223,6 +238,45 @@ namespace Zio
             from _ in  WriteLine("Nice")
             from i1 in fiber1.Join()
             from i2 in fiber2.Join()
+            select $"My beautiful ints {i1} {i2}";
+
+        public ZIO<string> Run() => ForkedZIO;
+    }
+
+    class ForkedMain : ZIOApp<string>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        // spill our guts
+        static ZIO<int> AsyncZIO1 = 
+            ZIO.Async<int>((complete) => 
+            {
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
+                Thread.Sleep(2000);
+                complete(new Random().Next(999));
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client End");
+                return Unit();
+            });
+
+        static ZIO<int> AsyncZIO2 = 
+            ZIO.Async<int>((complete) => 
+            {
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
+                Thread.Sleep(5000);
+                complete(new Random().Next(999));
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client End");
+                return Unit();
+            });
+
+        static ZIO<string> ForkedZIO =
+            from fiber1 in AsyncZIO2.Fork()
+            from _ in  WriteLine($"{Thread.CurrentThread.ManagedThreadId} Nice")
+            from i2 in AsyncZIO1
+            from i1 in fiber1.Join()
             select $"My beautiful ints {i1} {i2}";
 
         public ZIO<string> Run() => ForkedZIO;
@@ -352,7 +406,8 @@ namespace Zio
         //     from value in ZIO.Succeed(() => i)
         //     select value;
         static ZIO<int> ForkedZIO =
-            from _ in Increment.Fork().Repeat(1000)
+            from fiber1 in Increment.Fork()
+            from _ in fiber1.Join()
             from value in ZIO.Succeed(() => i)
             select value;
 
