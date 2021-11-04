@@ -348,7 +348,7 @@ namespace Zio
             {
                 Console.WriteLine("Howdy!");
                 return complete(Unit());
-            }).Fork().Repeat(10000);
+            }).Fork().Repeat(100000);
 
         public ZIO<Unit> Run() => MyProgram;
     }
