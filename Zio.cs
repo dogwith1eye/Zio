@@ -33,7 +33,7 @@ namespace Zio
     }
 
     // a fiber with the context necessary for evaluation
-    class FiberContext<A> : Fiber<A>
+    internal class FiberContext<A> : Fiber<A>
     {
         interface FiberState {}
         class Running : FiberState
@@ -118,13 +118,15 @@ namespace Zio
             });
  
         dynamic currentZIO = null;
+        private SynchronizationContext currentExecutor = null;
         private Stack<dynamic> stack = new Stack<dynamic>();
         private bool loop = true;
 
-        public FiberContext(ZIO<A> startZio)
+        public FiberContext(ZIO<A> startZio, SynchronizationContext startExecutor)
         {
             this.currentZIO = startZio;
-            Task.Run(() => this.Run());
+            this.currentExecutor = startExecutor;
+            this.currentExecutor.Post(_ => this.Run(), null);
         }
         Unit Continue(dynamic value)
         {
@@ -195,8 +197,13 @@ namespace Zio
                         break;
 
                     case "Fork":
-                        var fiber = currentZIO.CreateFiber();
+                        var fiber = currentZIO.CreateFiber(this.currentExecutor);
                         Continue(fiber);
+                        break;
+
+                    case "Shift":
+                        this.currentExecutor = currentZIO.Executor;
+                        Continue(Unit());
                         break;
 
                     default: 
@@ -211,7 +218,7 @@ namespace Zio
     // Flatmap Stack Safety CHECK
     // Async Stack Safety
     // Concurrency Safety CHECK
-    // Custom Execution Context
+    // Custom Execution Context CHECK
     // Interruption
     // Error Handling
     // Environment
@@ -220,8 +227,10 @@ namespace Zio
     // Async
     interface ZIO<A> 
     {
-        sealed Fiber<A> UnsafeRunFiber() => 
-            new FiberContext<A>(this); 
+        SynchronizationContext DefaultExecutor { get => new SynchronizationContext(); }
+        
+        internal sealed Fiber<A> UnsafeRunFiber() => 
+            new FiberContext<A>(this, this.DefaultExecutor); 
 
         sealed A UnsafeRunSync()
         {
@@ -271,6 +280,9 @@ namespace Zio
             if (n <= 0) return ZIO.SucceedNow(Unit());
             else return this.ZipRight(RepeatUnsafe(n - 1));
         }
+
+        ZIO<Unit> Shift(SynchronizationContext executor) =>
+            new Shift(executor);
 
         ZIO<(A, B)> Zip<B>(ZIO<B> that) => 
             ZipWith(that, (a, b) => (a, b));
@@ -370,8 +382,21 @@ namespace Zio
             this.Zio = zio;
         }
 
-        public FiberContext<A> CreateFiber() =>
-            new FiberContext<A>(Zio);
+        public FiberContext<A> CreateFiber(SynchronizationContext executor) =>
+            new FiberContext<A>(Zio, executor);
+    }
+
+    class Shift : ZIO<Unit>
+    {
+        public string Label
+        {
+            get => "Shift";
+        }
+        public SynchronizationContext Executor { get; }
+        public Shift(SynchronizationContext executor)
+        {
+            this.Executor = executor;
+        }
     }
 
     static class ZIO
@@ -382,5 +407,6 @@ namespace Zio
             new Effect<A>(value);
         internal static ZIO<A> SucceedNow<A>(A value) => 
             new Succeed<A>(value);
+
     }
 }
