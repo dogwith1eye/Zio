@@ -420,4 +420,12 @@ namespace Zio
 
         public ZIO<int> Run() => ForkedZIO;
     }
+
+    class ErrorHandling : ZIOApp<Unit>
+    {
+        static ZIO<Unit> MyProgram = 
+            ZIO.Fail<Unit>(() => new Exception("Failed!"));
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
 }
