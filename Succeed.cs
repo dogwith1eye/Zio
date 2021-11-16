@@ -433,4 +433,38 @@ namespace Zio
 
         public ZIO<Unit> Run() => MyProgram;
     }
+
+    class ErrorHandlingThrow : ZIOApp<Unit>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        static ZIO<Unit> MyProgram = 
+            ZIO.Succeed<Unit>(() => throw new Exception("Failed!"));
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
+
+    class ErrorHandlingThrowCatch : ZIOApp<int>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        static ZIO<int> MyProgram = 
+            ZIO
+                .Succeed<Unit>(() => throw new Exception("Failed!"))
+                .CatchAll(_ => WriteLine("This should never be shown"))
+                .FoldCauseZIO(
+                    c => WriteLine("Recovered from a cause $c").ZipRight(ZIO.Succeed(() => 1)),
+                    _ => ZIO.Succeed(() => 0)
+                );
+
+        public ZIO<int> Run() => MyProgram;
+    }
 }

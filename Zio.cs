@@ -39,6 +39,58 @@ namespace Zio
         public ZIO<B> Apply(A value) => this.Func(value);
     }
 
+    class Cause 
+    {
+        public Exception Exception { get; }
+        public ErrorChannel Channel { get; }
+        public Cause(Exception exception, ErrorChannel channel)
+        {
+            this.Exception = exception;
+            this.Channel = channel;
+        }
+    }
+    enum ErrorChannel { Fail, Die } 
+
+    struct Exit<A>
+    {
+        internal Cause Ex { get; }
+        internal A Value { get; }
+        
+        public bool Success => Ex == null;
+        public bool Failure => Ex != null;
+
+        internal Exit(Cause ex)
+        {
+            if (ex == null) throw new ArgumentNullException(nameof(ex));
+            Ex = ex;
+            Value = default(A);
+        }
+
+        internal Exit(A right)
+        {
+            Value = right;
+            Ex = null;
+        }
+
+        public static implicit operator Exit<A>(Cause left) => new Exit<A>(left);
+        public static implicit operator Exit<A>(A right) => new Exit<A>(right);
+
+        public B Match<B>(Func<Cause, B> Cause, Func<A, B> Success)
+         => this.Failure ? Cause(Ex) : Success(Value);
+
+        public Unit Match(Action<Cause> Cause, Action<A> Success)
+            => Match(Cause.ToFunc(), Success.ToFunc());
+
+        public override string ToString() 
+            => Match(
+                ex => $"Failure({ex.Channel}({ex.Exception.Message}))",
+                t => $"Success({t})");
+    }
+
+    public static class Exit
+    {
+    }
+
     interface Fiber<A>
     {
         // early completion
@@ -53,16 +105,16 @@ namespace Zio
         interface FiberState {}
         class Running : FiberState
         {
-            public List<Func<Exceptional<A>, Unit>> Callbacks { get; }
-            public Running(List<Func<Exceptional<A>, Unit>> callbacks)
+            public List<Func<Exit<A>, Unit>> Callbacks { get; }
+            public Running(List<Func<Exit<A>, Unit>> callbacks)
             {
                 this.Callbacks = callbacks;
             }
         }
         class Done : FiberState
         {
-            public Exceptional<A> Result { get; }
-            public Done(Exceptional<A> result)
+            public Exit<A> Result { get; }
+            public Done(Exit<A> result)
             {
                 this.Result = result;
             }
@@ -70,12 +122,12 @@ namespace Zio
         // CAS
         // compare and swap
         private Akka.Util.AtomicReference<FiberState> state = 
-            new Akka.Util.AtomicReference<FiberState>(new Running(new List<Func<Exceptional<A>, Unit>>()));
+            new Akka.Util.AtomicReference<FiberState>(new Running(new List<Func<Exit<A>, Unit>>()));
 
-        public Unit Complete(Exceptional<A> result)
+        public Unit Complete(Exit<A> result)
         {
             var loop = true;
-            var toComplete = new List<Func<Exceptional<A>, Unit>>();
+            var toComplete = new List<Func<Exit<A>, Unit>>();
             while (loop)
             {
                 var oldState = state.Value;
@@ -97,7 +149,7 @@ namespace Zio
             return Unit();
         }
 
-        public Unit Await(Func<Exceptional<A>, Unit> callback)
+        public Unit Await(Func<Exit<A>, Unit> callback)
         {
             //Console.WriteLine("Await with our callback");
             var loop = true;
@@ -124,13 +176,13 @@ namespace Zio
         }
 
         public ZIO<A> Join() =>
-            ZIO.Async<Exceptional<A>>(callback => 
+            ZIO.Async<Exit<A>>(callback => 
             {
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Before Await");
                 Await(callback);
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join After Await");
                 return Unit();
-            }).FlatMap(ZIO.FromExceptional);
+            }).FlatMap(ZIO.Done);
  
         dynamic currentZIO = null;
         private SynchronizationContext currentExecutor = null;
@@ -149,7 +201,7 @@ namespace Zio
             if (stack.Count == 0)
             {
                 loop = false;
-                Complete(Exceptional(value));
+                Complete(new Exit<A>(value));
             }
             else
             {
@@ -196,76 +248,83 @@ namespace Zio
         {
             while (loop)
             {
-                switch (currentZIO.Label)
+                try
                 {
-                    case "SucceedNow":
-                        Continue(currentZIO.Value);
-                        break;
-                    
-                    case "Succeed":
-                        Continue(currentZIO.Thunk());
-                        break;
+                    switch (currentZIO.Label)
+                    {
+                        case "SucceedNow":
+                            Continue(currentZIO.Value);
+                            break;
+                        
+                        case "Succeed":
+                            Continue(currentZIO.Thunk());
+                            break;
 
-                    case "FlatMap":
-                        stack.Push(currentZIO);
-                        //Console.WriteLine("Push:" + stack.Count);
-                        currentZIO = currentZIO.Zio;
-                        break;
+                        case "FlatMap":
+                            stack.Push(currentZIO);
+                            //Console.WriteLine("Push:" + stack.Count);
+                            currentZIO = currentZIO.Zio;
+                            break;
 
-                    case "Async":
-                        // we are always done with handling the run loop on the current thread 
-                        loop = false;
-                        // continue with the callback the user provided on the current thread
-                        if (stack.Count == 0)
-                        {      
-                            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start");  
-                            //currentZIO.Register(callback);
-                            Func<Exceptional<A>, Unit> complete = (a) => Complete(a);
-                            currentZIO.Complete(complete);
-                            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End");
-                        }
-                        // stack not empty so continue with our run loop on the thread left doing work
-                        else
-                        {
-                            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start {stack.Count()}");
-                            Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
-                            currentZIO.Resume(resume);
-                            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End {stack.Count()}");
-                        }
-                        break;
-
-                    case "Fork":
-                        var fiber = currentZIO.CreateFiber(this.currentExecutor);
-                        Continue(fiber);
-                        break;
-
-                    case "Shift":
-                        this.currentExecutor = currentZIO.Executor;
-                        Continue(Unit());
-                        break;
-
-                    case "Fail":
-                        var errorHandler = FindNextErrorHandler();
-                        if (errorHandler is null)
-                        {
+                        case "Async":
+                            // we are always done with handling the run loop on the current thread 
                             loop = false;
-                            Complete(currentZIO.Thunk());
-                        }
-                        else
-                        {
-                            this.currentZIO = errorHandler.Failure(currentZIO.Thunk());
-                        }
-                        break;
+                            // continue with the callback the user provided on the current thread
+                            if (stack.Count == 0)
+                            {      
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start");  
+                                //currentZIO.Register(callback);
+                                Func<Exit<A>, Unit> complete = (a) => Complete(a);
+                                currentZIO.Complete(complete);
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End");
+                            }
+                            // stack not empty so continue with our run loop on the thread left doing work
+                            else
+                            {
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start {stack.Count()}");
+                                Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
+                                currentZIO.Resume(resume);
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End {stack.Count()}");
+                            }
+                            break;
 
-                    case "Fold":
-                        stack.Push(currentZIO);
-                        //Console.WriteLine("Push:" + stack.Count);
-                        currentZIO = currentZIO.Zio;
-                        break;
+                        case "Fork":
+                            var fiber = currentZIO.CreateFiber(this.currentExecutor);
+                            Continue(fiber);
+                            break;
 
-                    default: 
-                        throw new Exception("Zio case does not match");
-                };
+                        case "Shift":
+                            this.currentExecutor = currentZIO.Executor;
+                            Continue(Unit());
+                            break;
+
+                        case "Fail":
+                            var errorHandler = FindNextErrorHandler();
+                            if (errorHandler is null)
+                            {
+                                loop = false;
+                                Complete(new Exit<A>(new Cause(currentZIO.Thunk(), ErrorChannel.Fail)));
+                            }
+                            else
+                            {
+                                this.currentZIO = errorHandler.Failure(currentZIO.Thunk());
+                            }
+                            break;
+
+                        case "Fold":
+                            stack.Push(currentZIO);
+                            //Console.WriteLine("Push:" + stack.Count);
+                            currentZIO = currentZIO.Zio;
+                            break;
+
+                        default: 
+                            throw new Exception("Zio case does not match");
+                    };
+                }
+                catch (Exception ex)
+                {
+                    this.currentZIO = ZIO.FailCause<Unit>(() => new Cause(ex, ErrorChannel.Die));
+                }
             }
             return Unit();
         }
@@ -289,16 +348,16 @@ namespace Zio
         internal sealed Fiber<A> UnsafeRunFiber() => 
             new FiberContext<A>(this, this.DefaultExecutor); 
 
-        sealed Exceptional<A> UnsafeRunSync()
+        sealed Exit<A> UnsafeRunSync()
         {
             var latch = new CountdownEvent(1);
-            Exceptional<A> result = Exceptional(default(A));
-            var zio = this.FoldZIO(
-                ex =>
+            var result = new Exit<A>(default(A));
+            var zio = this.FoldCauseZIO(
+                cause =>
                 {
                     return ZIO.Succeed(() =>
                     {
-                        result = ex;
+                        result = new Exit<A>(cause);
                         latch.Signal();
                         return Unit();
                     });
@@ -307,7 +366,7 @@ namespace Zio
                 {
                     return ZIO.Succeed(() =>
                     {
-                        result = Exceptional(a);
+                        result = new Exit<A>(a);
                         latch.Signal();
                         return Unit();
                     });
@@ -330,6 +389,17 @@ namespace Zio
             FoldZIO(e => ZIO.SucceedNow(failure(e)), a => ZIO.SucceedNow(success(a)));
 
         ZIO<B> FoldZIO<B>(Func<Exception, ZIO<B>> failure, Func<A, ZIO<B>> success) =>
+            FoldCauseZIO(cause =>
+            {
+                return cause.Channel switch
+                {
+                    ErrorChannel.Fail => failure(cause.Exception),
+                    ErrorChannel.Die  => ZIO.FailCause<B>(() => cause),
+                    _ => throw new Exception("Impossible")
+                };
+            }, success);
+
+        ZIO<B> FoldCauseZIO<B>(Func<Cause, ZIO<B>> failure, Func<A, ZIO<B>> success) =>
             new Fold<A, B>(this, failure, success);
 
         // correct by construction
@@ -441,10 +511,10 @@ namespace Zio
                 return resume(ZIO.SucceedNow(a));
             });
 
-        public Unit Complete(Func<Exceptional<A>, Unit> complete) =>
+        public Unit Complete(Func<Exit<A>, Unit> complete) =>
             this.Register(a =>
             {
-                return complete(Exceptional(a));
+                return complete(new Exit<A>(a));
             });
     }
 
@@ -483,8 +553,8 @@ namespace Zio
         {
             get => "Fail";
         }
-        public Func<Exception> Thunk { get; }
-        public Fail(Func<Exception> thunk)
+        public Func<Cause> Thunk { get; }
+        public Fail(Func<Cause> thunk)
         {
             this.Thunk = thunk;
         }
@@ -498,8 +568,8 @@ namespace Zio
         }
         public ZIO<A> Zio { get; }
         public Func<A, ZIO<B>> Success { get; }
-        public Func<Exception, ZIO<B>> Failure { get; }
-        public Fold(ZIO<A> zio, Func<Exception, ZIO<B>> failure, Func<A, ZIO<B>> success)
+        public Func<Cause, ZIO<B>> Failure { get; }
+        public Fold(ZIO<A> zio, Func<Cause, ZIO<B>> failure, Func<A, ZIO<B>> success)
         {
             this.Zio = zio;
             this.Failure = failure;
@@ -513,14 +583,15 @@ namespace Zio
     {
         public static ZIO<A> Async<A>(Func<Func<A, Unit>, Unit> register) =>
             new Async<A>(register);
-        public static ZIO<A> Fail<A>(Func<Exception> e) =>
-            new Fail<A>(e);
-        public static ZIO<A> FromExceptional<A>(Exceptional<A> exceptional) =>
-            exceptional.Match(ex => Fail<A>(() => ex), a => SucceedNow(a));
+        public static ZIO<A> Fail<A>(Func<Exception> ex) =>
+            new Fail<A>(() => new Cause(ex(), ErrorChannel.Fail));
+         public static ZIO<A> FailCause<A>(Func<Cause> cause) =>
+            new Fail<A>(cause);
+        public static ZIO<A> Done<A>(Exit<A> Exit) =>
+            Exit.Match(ex => FailCause<A>(() => ex), a => SucceedNow(a));
         public static ZIO<A> Succeed<A>(Func<A> f) => 
             new Succeed<A>(f);
         internal static ZIO<A> SucceedNow<A>(A value) => 
             new SucceedNow<A>(value);
-
     }
 }
