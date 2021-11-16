@@ -72,9 +72,6 @@ namespace Zio
             Ex = null;
         }
 
-        public static implicit operator Exit<A>(Cause left) => new Exit<A>(left);
-        public static implicit operator Exit<A>(A right) => new Exit<A>(right);
-
         public B Match<B>(Func<Cause, B> Cause, Func<A, B> Success)
          => this.Failure ? Cause(Ex) : Success(Value);
 
@@ -87,8 +84,16 @@ namespace Zio
                 t => $"Success({t})");
     }
 
-    public static class Exit
+    static class Exit
     {
+        public static Exit<A> Default<A>() =>
+            new Exit<A>(default(A));
+        public static Exit<A> Fail<A>(Exception ex) =>
+            Exit.Failure<A>(new Cause(ex, ErrorChannel.Fail));
+        public static Exit<A> Failure<A>(Cause cause) => 
+            new Exit<A>(cause);
+        public static Exit<A> Succeed<A>(A value) => 
+            new Exit<A>(value);
     }
 
     interface Fiber<A>
@@ -201,7 +206,7 @@ namespace Zio
             if (stack.Count == 0)
             {
                 loop = false;
-                Complete(new Exit<A>(value));
+                Complete(Exit.Succeed<A>(value));
             }
             else
             {
@@ -303,7 +308,7 @@ namespace Zio
                             if (errorHandler is null)
                             {
                                 loop = false;
-                                Complete(new Exit<A>(new Cause(currentZIO.Thunk(), ErrorChannel.Fail)));
+                                Complete(Exit.Fail(currentZIO.Thunk()));
                             }
                             else
                             {
@@ -323,7 +328,7 @@ namespace Zio
                 }
                 catch (Exception ex)
                 {
-                    this.currentZIO = ZIO.FailCause<Unit>(() => new Cause(ex, ErrorChannel.Die));
+                    this.currentZIO = ZIO.Die(ex);
                 }
             }
             return Unit();
@@ -351,13 +356,13 @@ namespace Zio
         sealed Exit<A> UnsafeRunSync()
         {
             var latch = new CountdownEvent(1);
-            var result = new Exit<A>(default(A));
+            var result = Exit.Default<A>();
             var zio = this.FoldCauseZIO(
                 cause =>
                 {
                     return ZIO.Succeed(() =>
                     {
-                        result = new Exit<A>(cause);
+                        result = Exit.Failure<A>(cause);
                         latch.Signal();
                         return Unit();
                     });
@@ -366,7 +371,7 @@ namespace Zio
                 {
                     return ZIO.Succeed(() =>
                     {
-                        result = new Exit<A>(a);
+                        result = Exit.Succeed(a);
                         latch.Signal();
                         return Unit();
                     });
@@ -514,7 +519,7 @@ namespace Zio
         public Unit Complete(Func<Exit<A>, Unit> complete) =>
             this.Register(a =>
             {
-                return complete(new Exit<A>(a));
+                return complete(Exit.Succeed<A>(a));
             });
     }
 
@@ -585,8 +590,10 @@ namespace Zio
             new Async<A>(register);
         public static ZIO<A> Fail<A>(Func<Exception> ex) =>
             new Fail<A>(() => new Cause(ex(), ErrorChannel.Fail));
-         public static ZIO<A> FailCause<A>(Func<Cause> cause) =>
+        public static ZIO<A> FailCause<A>(Func<Cause> cause) =>
             new Fail<A>(cause);
+        public static ZIO<Unit> Die(Exception ex) =>
+            FailCause<Unit>(() => new Cause(ex, ErrorChannel.Die));
         public static ZIO<A> Done<A>(Exit<A> Exit) =>
             Exit.Match(ex => FailCause<A>(() => ex), a => SucceedNow(a));
         public static ZIO<A> Succeed<A>(Func<A> f) => 
