@@ -173,7 +173,7 @@ namespace Zio
                 else
                 {
                     var cont = stack.Pop();
-                    if (currentZIO.Label == "Fold")
+                    if (cont.Label == "Fold")
                     {
                         errorHandler = cont;
                         loop = false;
@@ -253,12 +253,9 @@ namespace Zio
                         }
                         else
                         {
-                            this.currentZIO = errorHandler.failure(currentZIO.Thunk());
+                            this.currentZIO = errorHandler.Failure(currentZIO.Thunk());
                         }
                         break;
-                        // find next error handler
-                        // if it exists, find it
-                        // if it doesn't exist, fail
 
                     case "Fold":
                         stack.Push(currentZIO);
