@@ -13,9 +13,6 @@ namespace Zio
         {
             var result = this.Run().UnsafeRunSync();
             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} The result was ${result}");
-            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Done with Main");
-            Thread.Sleep(5000);
-            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Done with Main Sleep");
         }
     }
 
@@ -423,8 +420,16 @@ namespace Zio
 
     class ErrorHandling : ZIOApp<Unit>
     {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
         static ZIO<Unit> MyProgram = 
-            ZIO.Fail<Unit>(() => new Exception("Failed!"));
+            ZIO.Fail<Unit>(() => new Exception("Failed!"))
+                .FlatMap(_ => WriteLine("Here"))
+                .CatchAll(ex => WriteLine("Recovered from Error"));
 
         public ZIO<Unit> Run() => MyProgram;
     }
