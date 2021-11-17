@@ -422,13 +422,14 @@ namespace Zio
     // Concurrency Safety CHECK
     // Custom Execution Context CHECK
     // Error Handling CHECK
-    // Interruption
+    // Interruption CHECK
     // Environment
     // Stack as a function to a ZIO
     // Async Stack Safety
     // Heap growth forever
     // Switch to tags
     // Main has to wait for finalizer
+    // Uninterruptible mask (region which reverts to original status) (bracket in ZIO1, applyAndRelease ZIO2)
     interface ZIO<A> 
     {
         SynchronizationContext DefaultExecutor { get => new SynchronizationContext(); }
