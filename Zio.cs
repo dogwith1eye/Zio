@@ -211,7 +211,7 @@ namespace Zio
             else
             {
                 var cont = stack.Pop();
-                //Console.WriteLine("Pop:" + stack.Count);
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Continue Pop:{stack.Count}");
                 currentZIO = cont.Apply(value);
             }
             return Unit();
@@ -230,6 +230,7 @@ namespace Zio
                 else
                 {
                     var cont = stack.Pop();
+                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} FindNextErrorHandler Pop:{stack.Count}");
                     if (cont.Label == "Fold")
                     {
                         errorHandler = cont;
@@ -267,7 +268,7 @@ namespace Zio
 
                         case "FlatMap":
                             stack.Push(currentZIO);
-                            //Console.WriteLine("Push:" + stack.Count);
+                            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Push:{stack.Count}");
                             currentZIO = currentZIO.Zio;
                             break;
 
@@ -407,6 +408,12 @@ namespace Zio
         ZIO<B> FoldCauseZIO<B>(Func<Cause, ZIO<B>> failure, Func<A, ZIO<B>> success) =>
             new Fold<A, B>(this, failure, success);
 
+        ZIO<Unit> Forever()
+        {
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Forever");
+            return this.ZipRightF(() => Forever());
+        }
+
         // correct by construction
         ZIO<Fiber<A>> Fork() =>
             new Fork<A>(this);
@@ -416,20 +423,9 @@ namespace Zio
 
         ZIO<Unit> Repeat(int n)
         {
-            var count = n;
-            var result = ZIO.SucceedNow(Unit());
-            while (count > 0)
-            {
-                result = this.ZipRight<Unit>(result);
-                count -= 1;
-            }
-            return result;
-        }
-
-        ZIO<Unit> RepeatUnsafe(int n)
-        {
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Repeat:{n}");
             if (n <= 0) return ZIO.SucceedNow(Unit());
-            else return this.ZipRight(RepeatUnsafe(n - 1));
+            else return this.ZipRightF(() => Repeat(n - 1));
         }
 
         ZIO<Unit> Shift(SynchronizationContext executor) =>
@@ -447,9 +443,17 @@ namespace Zio
         ZIO<B> ZipRight<B>(ZIO<B> that) => 
             ZipWith(that, (a, b) => b);
 
+        ZIO<B> ZipRightF<B>(Func<ZIO<B>> that) => 
+            ZipWithF(that, (a, b) => b);
+
         ZIO<C> ZipWith<B, C>(ZIO<B> that, Func<A, B, C> f) => 
             from a in this
             from b in that
+            select f(a, b);
+
+        ZIO<C> ZipWithF<B, C>(Func<ZIO<B>> that, Func<A, B, C> f) => 
+            from a in this
+            from b in that()
             select f(a, b);
     }
 

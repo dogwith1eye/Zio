@@ -467,4 +467,53 @@ namespace Zio
 
         public ZIO<int> Run() => MyProgram;
     }
+
+    class ZipRight : ZIOApp<Unit>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        static ZIO<Unit> MyProgram = 
+            from _ in WriteLine("Hello")
+                .ZipRight(WriteLine("From"))
+                .ZipRight(WriteLine("AssociativeBoth"))
+            select Unit();
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
+
+    class ZipRightRepeat : ZIOApp<Unit>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        static ZIO<Unit> MyProgram = 
+            from _ in WriteLine("Hello")
+                .Repeat(10000)
+            select Unit();
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
+
+    class Forever : ZIOApp<Unit>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        static ZIO<Unit> MyProgram = 
+            from _ in WriteLine("Hello")
+                .Forever()
+            select Unit();
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
 }

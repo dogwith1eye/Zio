@@ -7,7 +7,7 @@ namespace Zio
     {
         static void Main(string[] args)
         {
-            ZIOApp<Unit> app = new ErrorHandlingThrow();
+            ZIOApp<Unit> app = new Forever();
             app.Main(args);
         }
     }
