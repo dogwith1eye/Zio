@@ -13,6 +13,8 @@ namespace Zio
         {
             var result = this.Run().UnsafeRunSync();
             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} The result was ${result}");
+            Thread.Sleep(5000);
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Main after sleep");
         }
     }
 
@@ -521,19 +523,20 @@ namespace Zio
     {
         static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
-            Console.WriteLine(message);
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} {message}");
             return Unit();
         });
 
         static ZIO<Unit> MyProgram = 
             from fiber in WriteLine("Howdy!")
                 .Forever()
+                .Ensuring(WriteLine("Goodbye"))
                 .Fork()
-            from sleep in ZIO.Succeed(() => 
-            {
-                Thread.Sleep(1000);
-                return Unit();
-            })
+            // from sleep in ZIO.Succeed(() => 
+            // {
+            //     Thread.Sleep(1000);
+            //     return Unit();
+            // })
             from _ in fiber.Interrupt()
             select Unit();
 

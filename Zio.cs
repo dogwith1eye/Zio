@@ -49,7 +49,7 @@ namespace Zio
             this.Channel = channel;
         }
     }
-    enum ErrorChannel { Fail, Die } 
+    enum ErrorChannel { Fail, Die, Interrupt } 
 
     struct Exit<A>
     {
@@ -230,17 +230,19 @@ namespace Zio
                 else
                 {
                     var cont = stack.Pop();
-                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} FindNextErrorHandler Pop:{stack.Count}");
+                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} FindNextErrorHandler Pop:{stack.Count} Label:{cont.Label}");
                     if (cont.Label == "Fold")
                     {
                         errorHandler = cont;
                         loop = false;
                     }
                 }
+                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Loop:{stack.Count} Label:{loop}");     
             }
             return errorHandler;
         }
-
+        
+        // has someone sent us the signal to stop executing
         private long _interrupted = 0;
         public bool Interrupted 
         {
@@ -256,6 +258,25 @@ namespace Zio
                 Interlocked.Exchange(ref _interrupted, Convert.ToInt64(value));
             }
         }
+
+        // are we in the process of finalizing ourselves
+        private long _interrupting = 0;
+        public bool Interrupting
+        {
+            get
+            {
+                /* Interlocked.Read() is only available for int64,
+                * so we have to represent the bool as a long with 0's and 1's
+                */
+                return Interlocked.Read(ref _interrupting) == 1;
+            }
+            set
+            {
+                Interlocked.Exchange(ref _interrupting, Convert.ToInt64(value));
+            }
+        }
+
+        bool ShouldInterrupt() => Interrupted && !Interrupting;
 
         public ZIO<Unit> Interrupt() =>
             ZIO.Succeed(() => 
@@ -277,10 +298,11 @@ namespace Zio
         {
             while (loop)
             {
-                var shouldInterrupt = Interrupted;
-                if (shouldInterrupt)
+                if (ShouldInterrupt())
                 {
-                    loop = false;
+                    Interrupting = true;
+                    stack.Push(currentZIO);
+                    currentZIO = ZIO.FailCause<Unit>(() => new Cause(null, ErrorChannel.Interrupt));
                 }
                 else
                 {
@@ -374,6 +396,7 @@ namespace Zio
     // Error Handling CHECK
     // Interruption
     // Environment
+    // Stack as a function to a ZIO
     // Async Stack Safety
     // Heap growth forever
     // Switch to tags
@@ -417,6 +440,11 @@ namespace Zio
 
         ZIO<A> CatchAll(Func<Exception, ZIO<A>> f) =>
             FoldZIO(e => f(e), a => ZIO.SucceedNow(a));
+
+        ZIO<A> Ensuring(ZIO<A> finalizer) =>
+            FoldCauseZIO(
+                cause => finalizer.ZipRight(ZIO.FailCause<A>(() => cause)),
+                a => finalizer.ZipRight(ZIO.SucceedNow(a)));
 
         ZIO<B> FlatMap<B>(Func<A, ZIO<B>> f) => 
             new FlatMap<A, B>(this, f);
