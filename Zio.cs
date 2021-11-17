@@ -240,7 +240,7 @@ namespace Zio
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Loop:{stack.Count} Label:{loop}");     
             }
             return errorHandler;
-        }
+        } 
         
         // has someone sent us the signal to stop executing
         private long _interrupted = 0;
@@ -276,7 +276,24 @@ namespace Zio
             }
         }
 
-        bool ShouldInterrupt() => Interrupted && !Interrupting;
+         // are we in a region where we are subject to being interrupted
+        private long _interruptible = 1;
+        public bool Interruptible
+        {
+            get
+            {
+                /* Interlocked.Read() is only available for int64,
+                * so we have to represent the bool as a long with 0's and 1's
+                */
+                return Interlocked.Read(ref _interruptible) == 1;
+            }
+            set
+            {
+                Interlocked.Exchange(ref _interruptible, Convert.ToInt64(value));
+            }
+        }
+
+        bool ShouldInterrupt() => Interrupted && Interruptible && !Interrupting;
 
         public ZIO<Unit> Interrupt() =>
             ZIO.Succeed(() => 
@@ -352,8 +369,19 @@ namespace Zio
                                 break;
 
                             case "Shift":
-                                this.currentExecutor = currentZIO.Executor;
+                                currentExecutor = currentZIO.Executor;
                                 Continue(Unit());
+                                break;
+
+                            case "SetInterruptStatus":
+                                var oldInterrruptible = this.Interruptible;
+                                Interruptible = InterruptStatusEnum.ToBoolean(this.currentZIO.InterruptStatus);
+                                var finalizer = ZIO.Succeed(() =>
+                                {
+                                    Interruptible = oldInterrruptible;
+                                    return Unit();
+                                });
+                                currentZIO = this.currentZIO.EnsuringOldStatus(finalizer);
                                 break;
 
                             case "Fail":
@@ -400,6 +428,7 @@ namespace Zio
     // Async Stack Safety
     // Heap growth forever
     // Switch to tags
+    // Main has to wait for finalizer
     interface ZIO<A> 
     {
         SynchronizationContext DefaultExecutor { get => new SynchronizationContext(); }
@@ -441,7 +470,7 @@ namespace Zio
         ZIO<A> CatchAll(Func<Exception, ZIO<A>> f) =>
             FoldZIO(e => f(e), a => ZIO.SucceedNow(a));
 
-        ZIO<A> Ensuring(ZIO<A> finalizer) =>
+        ZIO<A> Ensuring(ZIO<Unit> finalizer) =>
             FoldCauseZIO(
                 cause => finalizer.ZipRight(ZIO.FailCause<A>(() => cause)),
                 a => finalizer.ZipRight(ZIO.SucceedNow(a)));
@@ -485,6 +514,15 @@ namespace Zio
             if (n <= 0) return ZIO.SucceedNow(Unit());
             else return this.ZipRightF(() => Repeat(n - 1));
         }
+
+        ZIO<A> SetInterruptStatus(InterruptStatus status) =>
+            new SetInterruptStatus<A>(this, status);
+
+        ZIO<A> Interruptible() =>
+            SetInterruptStatus(InterruptStatus.Interruptible);
+
+        ZIO<A> Uninterruptible() =>
+            SetInterruptStatus(InterruptStatus.Uninterruptible);
 
         ZIO<Unit> Shift(SynchronizationContext executor) =>
             new Shift(executor);
@@ -644,6 +682,38 @@ namespace Zio
         }
 
         public ZIO<B> Apply(A value) => this.Success(value);
+    }
+
+    enum InterruptStatus { Interruptible, Uninterruptible }
+
+    static class InterruptStatusEnum
+    {
+        public static bool ToBoolean(InterruptStatus status) => status switch
+        {
+            
+            InterruptStatus.Interruptible => true,
+            InterruptStatus.Uninterruptible => false,
+            _ => throw new Exception("Impossible")
+        };
+    }
+
+    class SetInterruptStatus<A> : ZIO<A>
+    {
+        public string Label
+        {
+            get => "SetInterruptStatus";
+        }
+        public ZIO<A> Zio { get; }
+        public InterruptStatus InterruptStatus { get; }
+
+        public ZIO<A> EnsuringOldStatus(ZIO<Unit> finalizer) =>
+            Zio.Ensuring(finalizer);
+
+        public SetInterruptStatus(ZIO<A> zio, InterruptStatus interruptStatus)
+        {
+            this.Zio = zio;
+            this.InterruptStatus = interruptStatus;
+        }
     }
 
     static class ZIO

@@ -542,4 +542,30 @@ namespace Zio
 
         public ZIO<Unit> Run() => MyProgram;
     }
+
+    class Uninterruptible : ZIOApp<Unit>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} {message}");
+            return Unit();
+        });
+
+        static ZIO<Unit> MyProgram = 
+            from fiber in WriteLine("Howdy!")
+                .Repeat(10000)
+                .Uninterruptible()
+                .ZipRight(WriteLine("Howdy! Howdy!").Forever())
+                .Ensuring(WriteLine("Goodbye"))
+                .Fork()
+            // from sleep in ZIO.Succeed(() => 
+            // {
+            //     Thread.Sleep(100);
+            //     return Unit();
+            // })
+            from _ in fiber.Interrupt()
+            select Unit();
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
 }
