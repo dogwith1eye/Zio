@@ -477,7 +477,7 @@ namespace Zio
         });
 
         static ZIO<Unit> MyProgram = 
-            from _ in WriteLine("Hello")
+            from _ in WriteLine("Howdy!")
                 .ZipRight(WriteLine("From"))
                 .ZipRight(WriteLine("AssociativeBoth"))
             select Unit();
@@ -494,7 +494,7 @@ namespace Zio
         });
 
         static ZIO<Unit> MyProgram = 
-            from _ in WriteLine("Hello")
+            from _ in WriteLine("Howdy!")
                 .Repeat(10000)
             select Unit();
 
@@ -510,8 +510,31 @@ namespace Zio
         });
 
         static ZIO<Unit> MyProgram = 
-            from _ in WriteLine("Hello")
+            from _ in WriteLine("Howdy!")
                 .Forever()
+            select Unit();
+
+        public ZIO<Unit> Run() => MyProgram;
+    }
+
+    class Interruption : ZIOApp<Unit>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine(message);
+            return Unit();
+        });
+
+        static ZIO<Unit> MyProgram = 
+            from fiber in WriteLine("Howdy!")
+                .Forever()
+                .Fork()
+            from sleep in ZIO.Succeed(() => 
+            {
+                Thread.Sleep(1000);
+                return Unit();
+            })
+            from _ in fiber.Interrupt()
             select Unit();
 
         public ZIO<Unit> Run() => MyProgram;

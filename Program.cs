@@ -7,7 +7,7 @@ namespace Zio
     {
         static void Main(string[] args)
         {
-            ZIOApp<Unit> app = new Forever();
+            ZIOApp<Unit> app = new Interruption();
             app.Main(args);
         }
     }

@@ -101,7 +101,7 @@ namespace Zio
         // early completion
         // late completion
         ZIO<A> Join();
-        //Unit Start();
+        ZIO<Unit> Interrupt();
     }
 
     // a fiber with the context necessary for evaluation
@@ -241,6 +241,29 @@ namespace Zio
             return errorHandler;
         }
 
+        private long _interrupted = 0;
+        public bool Interrupted 
+        {
+            get
+            {
+                /* Interlocked.Read() is only available for int64,
+                * so we have to represent the bool as a long with 0's and 1's
+                */
+                return Interlocked.Read(ref _interrupted) == 1;
+            }
+            set
+            {
+                Interlocked.Exchange(ref _interrupted, Convert.ToInt64(value));
+            }
+        }
+
+        public ZIO<Unit> Interrupt() =>
+            ZIO.Succeed(() => 
+            {
+                Interrupted = true;
+                return Unit();
+            });
+
         Unit Resume(dynamic nextZIO)
         {
             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Resume");
@@ -254,82 +277,90 @@ namespace Zio
         {
             while (loop)
             {
-                try
+                var shouldInterrupt = Interrupted;
+                if (shouldInterrupt)
                 {
-                    switch (currentZIO.Label)
-                    {
-                        case "SucceedNow":
-                            Continue(currentZIO.Value);
-                            break;
-                        
-                        case "Succeed":
-                            Continue(currentZIO.Thunk());
-                            break;
-
-                        case "FlatMap":
-                            stack.Push(currentZIO);
-                            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Push:{stack.Count}");
-                            currentZIO = currentZIO.Zio;
-                            break;
-
-                        case "Async":
-                            // we are always done with handling the run loop on the current thread 
-                            loop = false;
-                            // continue with the callback the user provided on the current thread
-                            if (stack.Count == 0)
-                            {      
-                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start");  
-                                //currentZIO.Register(callback);
-                                Func<Exit<A>, Unit> complete = (a) => Complete(a);
-                                currentZIO.Complete(complete);
-                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End");
-                            }
-                            // stack not empty so continue with our run loop on the thread left doing work
-                            else
-                            {
-                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start {stack.Count()}");
-                                Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
-                                currentZIO.Resume(resume);
-                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End {stack.Count()}");
-                            }
-                            break;
-
-                        case "Fork":
-                            var fiber = currentZIO.CreateFiber(this.currentExecutor);
-                            Continue(fiber);
-                            break;
-
-                        case "Shift":
-                            this.currentExecutor = currentZIO.Executor;
-                            Continue(Unit());
-                            break;
-
-                        case "Fail":
-                            var errorHandler = FindNextErrorHandler();
-                            if (errorHandler is null)
-                            {
-                                loop = false;
-                                Complete(Exit.Fail(currentZIO.Thunk()));
-                            }
-                            else
-                            {
-                                this.currentZIO = errorHandler.Failure(currentZIO.Thunk());
-                            }
-                            break;
-
-                        case "Fold":
-                            stack.Push(currentZIO);
-                            //Console.WriteLine("Push:" + stack.Count);
-                            currentZIO = currentZIO.Zio;
-                            break;
-
-                        default: 
-                            throw new Exception("Zio case does not match");
-                    };
+                    loop = false;
                 }
-                catch (Exception ex)
+                else
                 {
-                    this.currentZIO = ZIO.Die(ex);
+                    try
+                    {
+                        switch (currentZIO.Label)
+                        {
+                            case "SucceedNow":
+                                Continue(currentZIO.Value);
+                                break;
+                            
+                            case "Succeed":
+                                Continue(currentZIO.Thunk());
+                                break;
+
+                            case "FlatMap":
+                                stack.Push(currentZIO);
+                                Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Push:{stack.Count}");
+                                currentZIO = currentZIO.Zio;
+                                break;
+
+                            case "Async":
+                                // we are always done with handling the run loop on the current thread 
+                                loop = false;
+                                // continue with the callback the user provided on the current thread
+                                if (stack.Count == 0)
+                                {      
+                                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start");  
+                                    //currentZIO.Register(callback);
+                                    Func<Exit<A>, Unit> complete = (a) => Complete(a);
+                                    currentZIO.Complete(complete);
+                                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End");
+                                }
+                                // stack not empty so continue with our run loop on the thread left doing work
+                                else
+                                {
+                                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run Start {stack.Count()}");
+                                    Func<dynamic, Unit> resume = (dyn) => Resume(dyn);
+                                    currentZIO.Resume(resume);
+                                    Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Async Run End {stack.Count()}");
+                                }
+                                break;
+
+                            case "Fork":
+                                var fiber = currentZIO.CreateFiber(this.currentExecutor);
+                                Continue(fiber);
+                                break;
+
+                            case "Shift":
+                                this.currentExecutor = currentZIO.Executor;
+                                Continue(Unit());
+                                break;
+
+                            case "Fail":
+                                var errorHandler = FindNextErrorHandler();
+                                if (errorHandler is null)
+                                {
+                                    loop = false;
+                                    Complete(Exit.Fail(currentZIO.Thunk()));
+                                }
+                                else
+                                {
+                                    this.currentZIO = errorHandler.Failure(currentZIO.Thunk());
+                                }
+                                break;
+
+                            case "Fold":
+                                stack.Push(currentZIO);
+                                //Console.WriteLine("Push:" + stack.Count);
+                                currentZIO = currentZIO.Zio;
+                                break;
+
+                            default: 
+                                throw new Exception("Zio case does not match");
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        this.currentZIO = ZIO.Die(ex);
+                    }
                 }
             }
             return Unit();
@@ -338,15 +369,14 @@ namespace Zio
 
     // Declarative Encoding CHECK
     // Flatmap Stack Safety CHECK
-    // Async Stack Safety
     // Concurrency Safety CHECK
     // Custom Execution Context CHECK
+    // Error Handling CHECK
     // Interruption
-    // Error Handling
     // Environment
-    
-    // ZIO<R, E, A>
-    // Async
+    // Async Stack Safety
+    // Heap growth forever
+    // Switch to tags
     interface ZIO<A> 
     {
         SynchronizationContext DefaultExecutor { get => new SynchronizationContext(); }
