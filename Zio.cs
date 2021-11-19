@@ -192,6 +192,7 @@ namespace Zio
         dynamic currentZIO = null;
         private SynchronizationContext currentExecutor = null;
         private Stack<dynamic> stack = new Stack<dynamic>();
+        private Stack<dynamic> envStack = new Stack<dynamic>();
         private bool loop = true;
 
         public FiberContext(ZIO<A> startZio, SynchronizationContext startExecutor)
@@ -403,6 +404,22 @@ namespace Zio
                                 currentZIO = currentZIO.Zio;
                                 break;
 
+                            case "Provide":
+                                envStack.Push(currentZIO.Environment);
+                                var pfinalizer = ZIO.Succeed<Unit>(() =>
+                                {
+                                    envStack.Pop();
+                                    return Unit();
+                                });
+                                currentZIO = currentZIO.Ensuring(pfinalizer);
+                                break;
+
+                            case "Access":
+                                var currentEnvironment = envStack.Peek();
+                                currentZIO = currentZIO.Thunk(currentEnvironment);
+                                break;
+
+
                             default: 
                                 throw new Exception("Zio case does not match");
                         };
@@ -508,6 +525,9 @@ namespace Zio
 
         ZIO<B> Map<B>(Func<A, B> f) => 
             this.FlatMap((a) => ZIO.SucceedNow(f(a)));
+
+        ZIO<A> Provide<R>(R r) =>
+            new Provide<R, A>(this, r);
 
         ZIO<Unit> Repeat(int n)
         {
@@ -717,8 +737,42 @@ namespace Zio
         }
     }
 
+    class Provide<R, A> : ZIO<A>
+    {
+        public string Label
+        {
+            get => "Provide";
+        }
+        public ZIO<A> Zio { get; }
+        public R Environment { get; }
+        public ZIO<A> Ensuring(ZIO<Unit> finalizer) =>
+            Zio.Ensuring(finalizer);
+        public Provide(ZIO<A> Zio, R environment)
+        {
+            this.Zio = Zio;
+            this.Environment = environment;
+        }
+    }
+
+    class Access<R, A> : ZIO<A>
+    {
+        public string Label
+        {
+            get => "Access";
+        }
+        public Func<R, ZIO<A>> Thunk { get; }
+        public Access(Func<R, ZIO<A>> thunk)
+        {
+            this.Thunk = thunk;
+        }
+    }
+
     static class ZIO
     {
+        public static ZIO<R> Environment<R>() =>
+            AccessZIO<R, R>(env => SucceedNow(env));
+        public static ZIO<A> AccessZIO<R, A>(Func<R, ZIO<A>> f) =>
+            new Access<R, A>(f);
         public static ZIO<A> Async<A>(Func<Func<A, Unit>, Unit> register) =>
             new Async<A>(register);
         public static ZIO<A> Fail<A>(Func<Exception> ex) =>

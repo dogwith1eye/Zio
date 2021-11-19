@@ -7,7 +7,7 @@ namespace Zio
     {
         static void Main(string[] args)
         {
-            ZIOApp<Unit> app = new Uninterruptible();
+            var app = ZIOApp.Upcast(new Environment());
             app.Main(args);
         }
     }

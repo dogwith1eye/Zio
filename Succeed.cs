@@ -18,6 +18,11 @@ namespace Zio
         }
     }
 
+    static class ZIOApp
+    {
+        public static ZIOApp<A> Upcast<A>(ZIOApp<A> app) => app;
+    }
+
     record Person(string name, int age)
     {
         public static Person Peter = new Person("Peter", 88);
@@ -567,5 +572,55 @@ namespace Zio
             select Unit();
 
         public ZIO<Unit> Run() => MyProgram;
+    }
+
+    public interface IntService
+    {
+        int Get() => 1;
+    }
+    public interface StringService
+    {
+        string Get() => "string";
+    }
+    public class Env : IntService, StringService {}
+
+    class Environment : ZIOApp<int>
+    {
+        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        {
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} {message}");
+            return Unit();
+        });
+
+        static ZIO<Unit> zio = 
+            ZIO.AccessZIO<IntService, Unit>(n => WriteLine($"{n.Get()}"));
+
+        static ZIO<Unit> zio2 = 
+            zio.Provide(new Env());
+
+        static ZIO<Unit> zio3 = 
+            ZIO.AccessZIO<StringService, Unit>(n => WriteLine($"{n.Get()}"));
+
+        static ZIO<(Unit, Unit)> zio4 = 
+            zio.Zip(zio3).Provide(new Env());
+
+        static ZIO<Unit> intZio = 
+            ZIO.AccessZIO<int, Unit>(n => WriteLine($"{n}"));
+
+        static ZIO<int> potentiallyScary = 
+            from x in ZIO.Environment<int>()
+            from _ in intZio.Provide(42)
+            from y in ZIO.Environment<int>()
+            select x + y;
+
+        static ZIO<int> potentiallyScarier = 
+            from x in ZIO.Environment<int>()
+            from _ in (intZio.ZipRight(ZIO.Fail<Unit>(() => new Exception("OH NO")))
+                .Provide(42)
+                .CatchAll(_ => ZIO.Succeed(() => Unit())))
+            from y in ZIO.Environment<int>()
+            select x + y;
+
+        public ZIO<int> Run() => potentiallyScary.Provide(100);
     }
 }
