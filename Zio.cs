@@ -11,32 +11,32 @@ namespace Zio
 {
     static class ZIOWorkflow
     {
-        public static ZIO<B> Select<A, B>
-           (this ZIO<A> self, Func<A, B> f)
+        public static ZIO<R, B> Select<R, A, B>
+           (this ZIO<R, A> self, Func<A, B> f)
            => self.Map(f);
 
-        public static ZIO<B> SelectMany<A, B>
-           (this ZIO<A> self, Func<A, ZIO<B>> f)
+        public static ZIO<R, B> SelectMany<R, A, B>
+           (this ZIO<R, A> self, Func<A, ZIO<R, B>> f)
            => self.FlatMap(f);
 
-        public static ZIO<BB> SelectMany<A, B, BB>
-           (this ZIO<A> self, Func<A, ZIO<B>> f, Func<A, B, BB> project)
+        public static ZIO<R, BB> SelectMany<R, A, B, BB>
+           (this ZIO<R, A> self, Func<A, ZIO<R, B>> f, Func<A, B, BB> project)
            => self.FlatMap(a => f(a).Map(b => project(a, b)));
     }
 
-    interface IContinuation<A, B>
+    interface IContinuation<R, A, B>
     {
-        ZIO<B> Apply(A value);
+        ZIO<R, B> Apply(A value);
     }
 
-    class Continuation<A, B> : ZIO<B>, IContinuation<A, B>
+    class Continuation<R, A, B> : ZIO<R, B>, IContinuation<R, A, B>
     {
-        private Func<A, ZIO<B>> Func { get; }
-        public Continuation(Func<A, ZIO<B>> func)
+        private Func<A, ZIO<R, B>> Func { get; }
+        public Continuation(Func<A, ZIO<R, B>> func)
         {
             this.Func = func;
         }
-        public ZIO<B> Apply(A value) => this.Func(value);
+        public ZIO<R, B> Apply(A value) => this.Func(value);
     }
 
     class Cause 
@@ -96,16 +96,16 @@ namespace Zio
             new Exit<A>(value);
     }
 
-    interface Fiber<A>
+    interface Fiber<R, A>
     {
         // early completion
         // late completion
-        ZIO<A> Join();
-        ZIO<Unit> Interrupt();
+        ZIO<R, A> Join();
+        ZIO<R, Unit> Interrupt();
     }
 
     // a fiber with the context necessary for evaluation
-    internal class FiberContext<A> : Fiber<A>
+    internal class FiberContext<R, A> : Fiber<R, A>
     {
         interface FiberState {}
         class Running : FiberState
@@ -180,21 +180,22 @@ namespace Zio
             return Unit();
         }
 
-        public ZIO<A> Join() =>
-            ZIO.Async<Exit<A>>(callback => 
+        public ZIO<R, A> Join() =>
+            ZIO.Async<R, Exit<A>>(callback => 
             {
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join Before Await");
                 Await(callback);
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Join After Await");
                 return Unit();
-            }).FlatMap(ZIO.Done);
+            }).FlatMap(ZIO.Done<R, A>);
  
         dynamic currentZIO = null;
         private SynchronizationContext currentExecutor = null;
         private Stack<dynamic> stack = new Stack<dynamic>();
+        private Stack<dynamic> envStack = new Stack<dynamic>();
         private bool loop = true;
 
-        public FiberContext(ZIO<A> startZio, SynchronizationContext startExecutor)
+        public FiberContext(ZIO<R, A> startZio, SynchronizationContext startExecutor)
         {
             this.currentZIO = startZio;
             this.currentExecutor = startExecutor;
@@ -295,8 +296,8 @@ namespace Zio
 
         bool ShouldInterrupt() => Interrupted && Interruptible && !Interrupting;
 
-        public ZIO<Unit> Interrupt() =>
-            ZIO.Succeed(() => 
+        public ZIO<R, Unit> Interrupt() =>
+            ZIO.Succeed<R, Unit>(() => 
             {
                 Interrupted = true;
                 return Unit();
@@ -376,12 +377,12 @@ namespace Zio
                             case "SetInterruptStatus":
                                 var oldInterrruptible = this.Interruptible;
                                 Interruptible = InterruptStatusEnum.ToBoolean(this.currentZIO.InterruptStatus);
-                                var finalizer = ZIO.Succeed(() =>
+                                var ifinalizer = ZIO.Succeed(() =>
                                 {
                                     Interruptible = oldInterrruptible;
                                     return Unit();
                                 });
-                                currentZIO = this.currentZIO.EnsuringOldStatus(finalizer);
+                                currentZIO = currentZIO.Ensuring(ifinalizer);
                                 break;
 
                             case "Fail":
@@ -393,7 +394,7 @@ namespace Zio
                                 }
                                 else
                                 {
-                                    this.currentZIO = errorHandler.Failure(currentZIO.Thunk());
+                                    currentZIO = errorHandler.Failure(currentZIO.Thunk());
                                 }
                                 break;
 
@@ -401,6 +402,21 @@ namespace Zio
                                 stack.Push(currentZIO);
                                 //Console.WriteLine("Push:" + stack.Count);
                                 currentZIO = currentZIO.Zio;
+                                break;
+
+                            case "Provide":
+                                envStack.Push(currentZIO.Environment);
+                                var pfinalizer = ZIO.Succeed<R, Unit>(() =>
+                                {
+                                    envStack.Pop();
+                                    return Unit();
+                                });
+                                currentZIO = currentZIO.Ensuring(pfinalizer);
+                                break;
+
+                            case "Access":
+                                var currentEnvironment = envStack.Peek();
+                                currentZIO = currentZIO.Thunk(currentEnvironment);
                                 break;
 
                             default: 
@@ -430,12 +446,12 @@ namespace Zio
     // Switch to tags
     // Main has to wait for finalizer
     // Uninterruptible mask (region which reverts to original status) (bracket in ZIO1, applyAndRelease ZIO2)
-    interface ZIO<A> 
+    interface ZIO<R, A> 
     {
         SynchronizationContext DefaultExecutor { get => new SynchronizationContext(); }
         
-        internal sealed Fiber<A> UnsafeRunFiber() => 
-            new FiberContext<A>(this, this.DefaultExecutor); 
+        internal sealed Fiber<R, A> UnsafeRunFiber() => 
+            new FiberContext<R, A>(this, this.DefaultExecutor); 
 
         sealed Exit<A> UnsafeRunSync()
         {
@@ -444,7 +460,7 @@ namespace Zio
             var zio = this.FoldCauseZIO(
                 cause =>
                 {
-                    return ZIO.Succeed(() =>
+                    return ZIO.Succeed<R, Unit>(() =>
                     {
                         result = Exit.Failure<A>(cause);
                         latch.Signal();
@@ -453,7 +469,7 @@ namespace Zio
                 },
                 a => 
                 {
-                    return ZIO.Succeed(() =>
+                    return ZIO.Succeed<R, Unit>(() =>
                     {
                         result = Exit.Succeed(a);
                         latch.Signal();
@@ -465,96 +481,99 @@ namespace Zio
             return result;
         }
 
-        ZIO<B> As<B>(B b) => 
+        ZIO<R, B> As<B>(B b) => 
             this.Map((_) => b);
 
-        ZIO<A> CatchAll(Func<Exception, ZIO<A>> f) =>
-            FoldZIO(e => f(e), a => ZIO.SucceedNow(a));
+        ZIO<R, A> CatchAll(Func<Exception, ZIO<R, A>> f) =>
+            FoldZIO(e => f(e), a => ZIO.SucceedNow<R, A>(a));
 
-        ZIO<A> Ensuring(ZIO<Unit> finalizer) =>
+        ZIO<R, A> Ensuring(ZIO<R, Unit> finalizer) =>
             FoldCauseZIO(
-                cause => finalizer.ZipRight(ZIO.FailCause<A>(() => cause)),
-                a => finalizer.ZipRight(ZIO.SucceedNow(a)));
+                cause => finalizer.ZipRight(ZIO.FailCause<R, A>(() => cause)),
+                a => finalizer.ZipRight(ZIO.SucceedNow<R, A>(a)));
 
-        ZIO<B> FlatMap<B>(Func<A, ZIO<B>> f) => 
-            new FlatMap<A, B>(this, f);
+        ZIO<R, B> FlatMap<B>(Func<A, ZIO<R, B>> f) => 
+            new FlatMap<R, A, B>(this, f);
 
-        ZIO<B> Fold<B>(Func<Exception, B> failure, Func<A, B> success) =>
-            FoldZIO(e => ZIO.SucceedNow(failure(e)), a => ZIO.SucceedNow(success(a)));
+        ZIO<R, B> Fold<B>(Func<Exception, B> failure, Func<A, B> success) =>
+            FoldZIO(e => ZIO.SucceedNow<R, B>(failure(e)), a => ZIO.SucceedNow<R, B>(success(a)));
 
-        ZIO<B> FoldZIO<B>(Func<Exception, ZIO<B>> failure, Func<A, ZIO<B>> success) =>
+        ZIO<R, B> FoldZIO<B>(Func<Exception, ZIO<R, B>> failure, Func<A, ZIO<R, B>> success) =>
             FoldCauseZIO(cause =>
             {
                 return cause.Channel switch
                 {
                     ErrorChannel.Fail => failure(cause.Exception),
-                    ErrorChannel.Die  => ZIO.FailCause<B>(() => cause),
+                    ErrorChannel.Die  => ZIO.FailCause<R, B>(() => cause),
                     _ => throw new Exception("Impossible")
                 };
             }, success);
 
-        ZIO<B> FoldCauseZIO<B>(Func<Cause, ZIO<B>> failure, Func<A, ZIO<B>> success) =>
-            new Fold<A, B>(this, failure, success);
+        ZIO<R, B> FoldCauseZIO<B>(Func<Cause, ZIO<R, B>> failure, Func<A, ZIO<R, B>> success) =>
+            new Fold<R, A, B>(this, failure, success);
 
-        ZIO<Unit> Forever()
+        ZIO<R, Unit> Forever()
         {
             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Forever");
             return this.ZipRightF(() => Forever());
         }
 
         // correct by construction
-        ZIO<Fiber<A>> Fork() =>
-            new Fork<A>(this);
+        ZIO<R, Fiber<R, A>> Fork() =>
+            new Fork<R, A>(this);
 
-        ZIO<B> Map<B>(Func<A, B> f) => 
-            this.FlatMap((a) => ZIO.SucceedNow(f(a)));
+        ZIO<R, B> Map<B>(Func<A, B> f) => 
+            this.FlatMap((a) => ZIO.SucceedNow<R, B>(f(a)));
 
-        ZIO<Unit> Repeat(int n)
+        ZIO<R, A> Provide(R r) =>
+            new Provide<R, A>(this, r);
+
+        ZIO<R, Unit> Repeat(int n)
         {
             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Repeat:{n}");
-            if (n <= 0) return ZIO.SucceedNow(Unit());
+            if (n <= 0) return ZIO.SucceedNow<R, Unit>(Unit());
             else return this.ZipRightF(() => Repeat(n - 1));
         }
 
-        ZIO<A> SetInterruptStatus(InterruptStatus status) =>
-            new SetInterruptStatus<A>(this, status);
+        ZIO<R, A> SetInterruptStatus(InterruptStatus status) =>
+            new SetInterruptStatus<R, A>(this, status);
 
-        ZIO<A> Interruptible() =>
+        ZIO<R, A> Interruptible() =>
             SetInterruptStatus(InterruptStatus.Interruptible);
 
-        ZIO<A> Uninterruptible() =>
+        ZIO<R, A> Uninterruptible() =>
             SetInterruptStatus(InterruptStatus.Uninterruptible);
 
-        ZIO<Unit> Shift(SynchronizationContext executor) =>
-            new Shift(executor);
+        ZIO<R, Unit> Shift(SynchronizationContext executor) =>
+            new Shift<R>(executor);
 
-        ZIO<(A, B)> Zip<B>(ZIO<B> that) => 
+        ZIO<R, (A, B)> Zip<B>(ZIO<R, B> that) => 
             ZipWith(that, (a, b) => (a, b));
 
-        ZIO<(A, B)> ZipPar<B>(ZIO<B> that) => 
+        ZIO<R, (A, B)> ZipPar<B>(ZIO<R, B> that) => 
             from f in this.Fork()
             from b in that
             from a in f.Join()
             select (a, b);
         
-        ZIO<B> ZipRight<B>(ZIO<B> that) => 
+        ZIO<R, B> ZipRight<B>(ZIO<R, B> that) => 
             ZipWith(that, (a, b) => b);
 
-        ZIO<B> ZipRightF<B>(Func<ZIO<B>> that) => 
+        ZIO<R, B> ZipRightF<B>(Func<ZIO<R, B>> that) => 
             ZipWithF(that, (a, b) => b);
 
-        ZIO<C> ZipWith<B, C>(ZIO<B> that, Func<A, B, C> f) => 
+        ZIO<R, C> ZipWith<B, C>(ZIO<R, B> that, Func<A, B, C> f) => 
             from a in this
             from b in that
             select f(a, b);
 
-        ZIO<C> ZipWithF<B, C>(Func<ZIO<B>> that, Func<A, B, C> f) => 
+        ZIO<R, C> ZipWithF<B, C>(Func<ZIO<R, B>> that, Func<A, B, C> f) => 
             from a in this
             from b in that()
             select f(a, b);
     }
 
-    class SucceedNow<A> : ZIO<A>
+    class SucceedNow<R, A> : ZIO<R, A>
     {
         public string Label
         {
@@ -569,7 +588,7 @@ namespace Zio
         }
     }
 
-    class Succeed<A> : ZIO<A>
+    class Succeed<R, A> : ZIO<R, A>
     {
         public string Label
         {
@@ -582,24 +601,24 @@ namespace Zio
         }
     }
 
-    class FlatMap<A, B> : ZIO<B>, IContinuation<A, B>
+    class FlatMap<R, A, B> : ZIO<R, B>, IContinuation<R, A, B>
     {
         public string Label
         {
             get => "FlatMap";
         }
-        public ZIO<A> Zio { get; }
-        public Func<A, ZIO<B>> Cont { get; }
-        public FlatMap(ZIO<A> zio, Func<A, ZIO<B>> cont)
+        public ZIO<R, A> Zio { get; }
+        public Func<A, ZIO<R, B>> Cont { get; }
+        public FlatMap(ZIO<R, A> zio, Func<A, ZIO<R, B>> cont)
         {
             this.Zio = zio;
             this.Cont = cont;
         }
 
-        public ZIO<B> Apply(A value) => this.Cont(value);
+        public ZIO<R, B> Apply(A value) => this.Cont(value);
     }
 
-    class Async<A> : ZIO<A>
+    class Async<R, A> : ZIO<R, A>
     {
         public string Label
         {
@@ -624,23 +643,23 @@ namespace Zio
             });
     }
 
-    class Fork<A> : ZIO<Fiber<A>>
+    class Fork<R, A> : ZIO<R, Fiber<R, A>>
     {
         public string Label
         {
             get => "Fork";
         }
-        public ZIO<A> Zio { get; }
-        public Fork(ZIO<A> zio)
+        public ZIO<R, A> Zio { get; }
+        public Fork(ZIO<R, A> zio)
         {
             this.Zio = zio;
         }
 
-        public FiberContext<A> CreateFiber(SynchronizationContext executor) =>
-            new FiberContext<A>(Zio, executor);
+        public FiberContext<R, A> CreateFiber(SynchronizationContext executor) =>
+            new FiberContext<R, A>(Zio, executor);
     }
 
-    class Shift : ZIO<Unit>
+    class Shift<R> : ZIO<R, Unit>
     {
         public string Label
         {
@@ -653,7 +672,7 @@ namespace Zio
         }
     }
 
-    class Fail<A> : ZIO<A>
+    class Fail<R, A> : ZIO<R, A>
     {
         public string Label
         {
@@ -666,23 +685,23 @@ namespace Zio
         }
     }
 
-    class Fold<A, B> : ZIO<B>, IContinuation<A, B>
+    class Fold<R, A, B> : ZIO<R, B>, IContinuation<R, A, B>
     {
         public string Label
         {
             get => "Fold";
         }
-        public ZIO<A> Zio { get; }
-        public Func<A, ZIO<B>> Success { get; }
-        public Func<Cause, ZIO<B>> Failure { get; }
-        public Fold(ZIO<A> zio, Func<Cause, ZIO<B>> failure, Func<A, ZIO<B>> success)
+        public ZIO<R, A> Zio { get; }
+        public Func<A, ZIO<R, B>> Success { get; }
+        public Func<Cause, ZIO<R, B>> Failure { get; }
+        public Fold(ZIO<R, A> zio, Func<Cause, ZIO<R, B>> failure, Func<A, ZIO<R, B>> success)
         {
             this.Zio = zio;
             this.Failure = failure;
             this.Success = success;
         }
 
-        public ZIO<B> Apply(A value) => this.Success(value);
+        public ZIO<R, B> Apply(A value) => this.Success(value);
     }
 
     enum InterruptStatus { Interruptible, Uninterruptible }
@@ -698,40 +717,90 @@ namespace Zio
         };
     }
 
-    class SetInterruptStatus<A> : ZIO<A>
+    class SetInterruptStatus<R, A> : ZIO<R, A>
     {
         public string Label
         {
             get => "SetInterruptStatus";
         }
-        public ZIO<A> Zio { get; }
+        public ZIO<R, A> Zio { get; }
         public InterruptStatus InterruptStatus { get; }
 
-        public ZIO<A> EnsuringOldStatus(ZIO<Unit> finalizer) =>
+        public ZIO<R, A> Ensuring(ZIO<R, Unit> finalizer) =>
             Zio.Ensuring(finalizer);
 
-        public SetInterruptStatus(ZIO<A> zio, InterruptStatus interruptStatus)
+        public SetInterruptStatus(ZIO<R, A> zio, InterruptStatus interruptStatus)
         {
             this.Zio = zio;
             this.InterruptStatus = interruptStatus;
         }
     }
 
+    class Provide<R, A> : ZIO<R, A>
+    {
+        public string Label
+        {
+            get => "Provide";
+        }
+        public ZIO<R, A> Zio { get; }
+        public R Environment { get; }
+        public ZIO<R, A> Ensuring(ZIO<R, Unit> finalizer) =>
+            Zio.Ensuring(finalizer);
+        public Provide(ZIO<R, A> Zio, R environment)
+        {
+            this.Zio = Zio;
+            this.Environment = environment;
+        }
+    }
+
+    class Access<R, A> : ZIO<R, A>
+    {
+        public string Label
+        {
+            get => "Access";
+        }
+        public Func<R, ZIO<R, A>> Thunk { get; }
+        public Access(Func<R, ZIO<R, A>> thunk)
+        {
+            this.Thunk = thunk;
+        }
+    }
+
     static class ZIO
     {
-        public static ZIO<A> Async<A>(Func<Func<A, Unit>, Unit> register) =>
-            new Async<A>(register);
-        public static ZIO<A> Fail<A>(Func<Exception> ex) =>
-            new Fail<A>(() => new Cause(ex(), ErrorChannel.Fail));
-        public static ZIO<A> FailCause<A>(Func<Cause> cause) =>
-            new Fail<A>(cause);
-        public static ZIO<Unit> Die(Exception ex) =>
-            FailCause<Unit>(() => new Cause(ex, ErrorChannel.Die));
-        public static ZIO<A> Done<A>(Exit<A> Exit) =>
+        public static ZIO<R, R> Environment<R>() =>
+            AccessZIO<R, R>(env => SucceedNow<R, R>(env));
+        public static ZIO<Unit, A> AccessZIO<A>(Func<Unit, ZIO<Unit, A>> f) =>
+            new Access<Unit, A>(f);
+        public static ZIO<R, A> AccessZIO<R, A>(Func<R, ZIO<R, A>> f) =>
+            new Access<R, A>(f);
+        public static ZIO<Unit, A> Async<A>(Func<Func<A, Unit>, Unit> register) =>
+            new Async<Unit, A>(register);
+        public static ZIO<R, A> Async<R, A>(Func<Func<A, Unit>, Unit> register) =>
+            new Async<R, A>(register);
+        public static ZIO<Unit, A> Fail<A>(Func<Exception> ex) =>
+            new Fail<Unit, A>(() => new Cause(ex(), ErrorChannel.Fail));
+        public static ZIO<R, A> Fail<R, A>(Func<Exception> ex) =>
+            new Fail<R, A>(() => new Cause(ex(), ErrorChannel.Fail));
+        public static ZIO<Unit, A> FailCause<A>(Func<Cause> cause) =>
+            new Fail<Unit, A>(cause);
+        public static ZIO<R, A> FailCause<R, A>(Func<Cause> cause) =>
+            new Fail<R, A>(cause);
+        public static ZIO<Unit, Unit> Die(Exception ex) =>
+            FailCause<Unit, Unit>(() => new Cause(ex, ErrorChannel.Die));
+        public static ZIO<R, Unit> Die<R>(Exception ex) =>
+            FailCause<R, Unit>(() => new Cause(ex, ErrorChannel.Die));
+        public static ZIO<Unit, A> Done<A>(Exit<A> Exit) =>
             Exit.Match(ex => FailCause<A>(() => ex), a => SucceedNow(a));
-        public static ZIO<A> Succeed<A>(Func<A> f) => 
-            new Succeed<A>(f);
-        internal static ZIO<A> SucceedNow<A>(A value) => 
-            new SucceedNow<A>(value);
+        public static ZIO<R, A> Done<R, A>(Exit<A> Exit) =>
+            Exit.Match(ex => FailCause<R, A>(() => ex), a => SucceedNow<R, A>(a));
+        public static ZIO<Unit, A> Succeed<A>(Func<A> f) => 
+            new Succeed<Unit, A>(f);
+        public static ZIO<R, A> Succeed<R, A>(Func<A> f) => 
+            new Succeed<R, A>(f);
+        internal static ZIO<Unit, A> SucceedNow<A>(A value) => 
+            new SucceedNow<Unit, A>(value);
+        internal static ZIO<R, A> SucceedNow<R, A>(A value) => 
+            new SucceedNow<R, A>(value);
     }
 }

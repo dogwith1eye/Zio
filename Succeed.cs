@@ -5,9 +5,9 @@ using System.Threading;
 
 namespace Zio
 {
-    interface ZIOApp<T> 
+    interface ZIOApp<R, T> 
     {
-        ZIO<T> Run();
+        ZIO<R, T> Run();
 
         void Main(string[] args)
         {
@@ -18,18 +18,23 @@ namespace Zio
         }
     }
 
+    static class ZIOApp
+    {
+        public static ZIOApp<R, A> Upcast<R, A>(ZIOApp<R, A> app) => app;
+    }
+
     record Person(string name, int age)
     {
         public static Person Peter = new Person("Peter", 88);
     }
 
-    class SucceedNow : ZIOApp<Person>
+    class SucceedNow : ZIOApp<Unit, Person>
     {
-        ZIO<Person> PeterZIO = ZIO.SucceedNow(Person.Peter);
-        public ZIO<Person> Run() => PeterZIO;
+        ZIO<Unit, Person> PeterZIO = ZIO.SucceedNow(Person.Peter);
+        public ZIO<Unit, Person> Run() => PeterZIO;
     }
 
-    class SucceedNowUhOh : ZIOApp<int>
+    class SucceedNowUhOh : ZIOApp<Unit, int>
     {
         static Func<Unit> temp = () => 
         {
@@ -37,106 +42,106 @@ namespace Zio
             return Unit();
         };
         // we get eagerly evaluated
-        ZIO<Unit> HowdyZIO = ZIO.SucceedNow(temp());
-        public ZIO<int> Run() => ZIO.SucceedNow(1);
+        ZIO<Unit, Unit> HowdyZIO = ZIO.SucceedNow(temp());
+        public ZIO<Unit, int> Run() => ZIO.SucceedNow(1);
     }
 
-    class Succeed : ZIOApp<int>
+    class Succeed : ZIOApp<Unit, int>
     {
         // we not longer get eagerly evaluated
         // as we have trapped the computation in
         // a function
-        ZIO<Unit> HowdyZIO = ZIO.Succeed(() => 
+        ZIO<Unit, Unit> HowdyZIO = ZIO.Succeed(() => 
         {
             Console.WriteLine("Howdy");
             return Unit();
         });
-        public ZIO<int> Run() => ZIO.SucceedNow(1);
+        public ZIO<Unit, int> Run() => ZIO.SucceedNow(1);
     }
 
-    class SucceedAgain : ZIOApp<Unit>
+    class SucceedAgain : ZIOApp<Unit, Unit>
     {
-        ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
-        public ZIO<Unit> Run() => WriteLine("fancy");
+        public ZIO<Unit, Unit> Run() => WriteLine("fancy");
     }
 
-    class Zip : ZIOApp<(int, string)>
+    class Zip : ZIOApp<Unit, (int, string)>
     {
-        ZIO<(int, string)> ZippedZIO = 
+        ZIO<Unit, (int, string)> ZippedZIO = 
             ZIO.Succeed(() => 8).Zip(ZIO.Succeed(() => "LO"));
 
-        public ZIO<(int, string)> Run() => ZippedZIO;
+        public ZIO<Unit, (int, string)> Run() => ZippedZIO;
     }
 
-    class Map : ZIOApp<Person>
+    class Map : ZIOApp<Unit, Person>
     {
-        static ZIO<(int, string)> ZippedZIO = 
+        static ZIO<Unit, (int, string)> ZippedZIO = 
             ZIO.Succeed(() => 8).Zip(ZIO.Succeed(() => "LO"));
         
-        static ZIO<(string, int)> MappedZIO = 
+        static ZIO<Unit, (string, int)> MappedZIO = 
             ZippedZIO.Map<(string, int)>((z) => (z.Item2, z.Item1));
 
-        static ZIO<Person> PersonZIO = 
+        static ZIO<Unit, Person> PersonZIO = 
             ZippedZIO.Map<Person>((z) => new Person(z.Item2, z.Item1));
 
-        public ZIO<Person> Run() => PersonZIO;
+        public ZIO<Unit, Person> Run() => PersonZIO;
     }
 
-    class FlatMap : ZIOApp<Unit>
+    class FlatMap : ZIOApp<Unit, Unit>
     {
-        static ZIO<(int, string)> ZippedZIO = 
+        static ZIO<Unit, (int, string)> ZippedZIO = 
             ZIO.Succeed(() => 8).Zip(ZIO.Succeed(() => "LO"));
         
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
         
-        static ZIO<Unit> MappedZIO = 
-            ZippedZIO.FlatMap<Unit>((z) => WriteLine($"My beautiful tuple {z}"));
+        static ZIO<Unit, Unit> MappedZIO = 
+            ZippedZIO.FlatMap((z) => WriteLine($"My beautiful tuple {z}"));
 
-        public ZIO<Unit> Run() => MappedZIO;
+        public ZIO<Unit, Unit> Run() => MappedZIO;
     }
 
-    class LinqComprehension : ZIOApp<string>
+    class LinqComprehension : ZIOApp<Unit, string>
     {
-        static ZIO<(int, string)> ZippedZIO = 
+        static ZIO<Unit, (int, string)> ZippedZIO = 
             ZIO.Succeed(() => 8).Zip(ZIO.Succeed(() => "LO"));
         
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
         
-        static ZIO<string> MappedZIO = 
+        static ZIO<Unit, string> MappedZIO = 
             from z in ZippedZIO
             from _ in WriteLine($"My beautiful tuple {z}")
             select "Nice";
 
-        static ZIO<string> MappedZIORaw = 
+        static ZIO<Unit, string> MappedZIORaw = 
             ZippedZIO.FlatMap(z => 
                 WriteLine($"My beautiful tuple {z}")
                     .Map((_) => "Nice"));
 
-        static ZIO<string> MappedZIORawAs = 
+        static ZIO<Unit, string> MappedZIORawAs = 
             ZippedZIO.FlatMap(z => 
                 WriteLine($"My beautiful tuple {z}")
                     .As("Nice"));
 
-        public ZIO<string> Run() => MappedZIORawAs;
+        public ZIO<Unit, string> Run() => MappedZIORawAs;
     }
 
-    class Async : ZIOApp<int>
+    class Async : ZIOApp<Unit, int>
     {
         // spill our guts
-        static ZIO<int> AsyncZIO = 
+        static ZIO<Unit, int> AsyncZIO = 
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine("Async Start");
@@ -146,13 +151,13 @@ namespace Zio
                 return Unit();
             });
 
-        public ZIO<int> Run() => AsyncZIO;
+        public ZIO<Unit, int> Run() => AsyncZIO;
     }
 
-    class Async2 : ZIOApp<int>
+    class Async2 : ZIOApp<Unit, int>
     {
         // spill our guts
-        static ZIO<int> AsyncZIO = 
+        static ZIO<Unit, int> AsyncZIO = 
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine("Async Start");
@@ -162,22 +167,22 @@ namespace Zio
                 return Unit();
             });
 
-        public ZIO<int> Run() => 
+        public ZIO<Unit, int> Run() => 
             from a in AsyncZIO
             from b in AsyncZIO
             select b;
     }
 
-    class Forked : ZIOApp<string>
+    class Forked : ZIOApp<Unit, string>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
         // spill our guts
-        static ZIO<int> AsyncZIO = 
+        static ZIO<Unit, int> AsyncZIO = 
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
@@ -187,7 +192,7 @@ namespace Zio
                 return Unit();
             });
 
-        static ZIO<int> AsyncZIO2 = 
+        static ZIO<Unit, int> AsyncZIO2 = 
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
@@ -197,7 +202,7 @@ namespace Zio
                 return Unit();
             });
 
-        static ZIO<string> ForkedZIO =
+        static ZIO<Unit, string> ForkedZIO =
             from fiber1 in AsyncZIO.Fork()
             from fiber2 in AsyncZIO.Fork()
             from _ in  WriteLine($"{Thread.CurrentThread.ManagedThreadId} Nice")
@@ -205,19 +210,19 @@ namespace Zio
             from i2 in fiber2.Join()
             select $"My beautiful ints {i1} {i2}";
 
-        public ZIO<string> Run() => ForkedZIO;
+        public ZIO<Unit, string> Run() => ForkedZIO;
     }
 
-    class ForkedSync : ZIOApp<string>
+    class ForkedSync : ZIOApp<Unit, string>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
         // spill our guts
-        static ZIO<int> SyncZIO = 
+        static ZIO<Unit, int> SyncZIO = 
             ZIO.Succeed<int>(() => 
             {
                 Console.WriteLine("Howdy!");
@@ -226,7 +231,7 @@ namespace Zio
                 return new Random().Next(999);
             });
 
-        static ZIO<string> ForkedZIO =
+        static ZIO<Unit, string> ForkedZIO =
             from fiber1 in SyncZIO.Fork()
             from fiber2 in SyncZIO.Fork()
             from _ in  WriteLine("Nice")
@@ -234,19 +239,19 @@ namespace Zio
             from i2 in fiber2.Join()
             select $"My beautiful ints {i1} {i2}";
 
-        public ZIO<string> Run() => ForkedZIO;
+        public ZIO<Unit, string> Run() => ForkedZIO;
     }
 
-    class ForkedMain : ZIOApp<string>
+    class ForkedMain : ZIOApp<Unit, string>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
         // spill our guts
-        static ZIO<int> AsyncZIO1 = 
+        static ZIO<Unit, int> AsyncZIO1 = 
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
@@ -256,7 +261,7 @@ namespace Zio
                 return Unit();
             });
 
-        static ZIO<int> AsyncZIO2 = 
+        static ZIO<Unit, int> AsyncZIO2 = 
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} Client Start");
@@ -266,26 +271,26 @@ namespace Zio
                 return Unit();
             });
 
-        static ZIO<string> ForkedZIO =
+        static ZIO<Unit, string> ForkedZIO =
             from fiber1 in AsyncZIO2.Fork()
             from _ in  WriteLine($"{Thread.CurrentThread.ManagedThreadId} Nice")
             from i2 in AsyncZIO1
             from i1 in fiber1.Join()
             select $"My beautiful ints {i1} {i2}";
 
-        public ZIO<string> Run() => ForkedZIO;
+        public ZIO<Unit, string> Run() => ForkedZIO;
     }
 
-    class ZipPar : ZIOApp<(int, int)>
+    class ZipPar : ZIOApp<Unit, (int, int)>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
         // spill our guts
-        static ZIO<int> AsyncZIO = 
+        static ZIO<Unit, int> AsyncZIO = 
             ZIO.Async<int>((complete) => 
             {
                 Console.WriteLine("Async Beginneth!");
@@ -293,19 +298,19 @@ namespace Zio
                 return complete(new Random().Next(999));
             });
 
-        public ZIO<(int, int)> Run() => AsyncZIO.ZipPar(AsyncZIO);
+        public ZIO<Unit, (int, int)> Run() => AsyncZIO.ZipPar(AsyncZIO);
     }
 
-    class ZipParSucceed : ZIOApp<(int, int)>
+    class ZipParSucceed : ZIOApp<Unit, (int, int)>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
         // spill our guts
-        static ZIO<int> SyncZIO = 
+        static ZIO<Unit, int> SyncZIO = 
             ZIO.Succeed<int>(() => 
             {
                 Console.WriteLine("Sync Beginneth!");
@@ -313,46 +318,46 @@ namespace Zio
                 return new Random().Next(999);
             });
 
-        public ZIO<(int, int)> Run() => SyncZIO.ZipPar(SyncZIO);
+        public ZIO<Unit, (int, int)> Run() => SyncZIO.ZipPar(SyncZIO);
     }
 
-    class StackSafety : ZIOApp<Unit>
+    class StackSafety : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             ZIO.Succeed(() => 
             {
                 Console.WriteLine("Howdy!");
                 return Unit();
             }).Repeat(10000);
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class AsyncStackSafety : ZIOApp<Unit>
+    class AsyncStackSafety : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             ZIO.Async<Unit>(complete => 
             {
                 Console.WriteLine("Howdy!");
                 return complete(Unit());
             }).Repeat(10000);
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class AsyncStackSafetyFork : ZIOApp<Unit>
+    class AsyncStackSafetyFork : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             ZIO.Async<Unit>(complete => 
             {
                 Console.WriteLine("Howdy!");
                 return complete(Unit());
             }).Fork().Repeat(1000);
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class ConcurrencyUhOh : ZIOApp<int>
+    class ConcurrencyUhOh : ZIOApp<Unit, int>
     {
         // Expectations in synchronous world
 
@@ -399,7 +404,7 @@ namespace Zio
 
         static int i = 0;
 
-        static ZIO<Unit> Increment = 
+        static ZIO<Unit, Unit> Increment = 
             ZIO.Succeed<Unit>(() =>
             {
                 i+=1;
@@ -407,58 +412,58 @@ namespace Zio
                 return Unit();
             });
 
-        // static ZIO<int> ForkedZIO =
+        // static ZIO<Unit, int> ForkedZIO =
         //     from _ in Increment.Fork().Repeat(1000)
         //     from value in ZIO.Succeed(() => i)
         //     select value;
-        static ZIO<int> ForkedZIO =
+        static ZIO<Unit, int> ForkedZIO =
             from fiber1 in Increment.Fork()
             from _ in fiber1.Join()
             from value in ZIO.Succeed(() => i)
             select value;
 
-        public ZIO<int> Run() => ForkedZIO;
+        public ZIO<Unit, int> Run() => ForkedZIO;
     }
 
-    class ErrorHandling : ZIOApp<Unit>
+    class ErrorHandling : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             ZIO.Fail<Unit>(() => new Exception("Failed!"))
                 .FlatMap(_ => WriteLine("Here"))
                 .CatchAll(ex => WriteLine("Recovered from Error"));
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class ErrorHandlingThrow : ZIOApp<Unit>
+    class ErrorHandlingThrow : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             ZIO.Succeed<Unit>(() => throw new Exception("Failed!"));
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class ErrorHandlingThrowCatch : ZIOApp<int>
+    class ErrorHandlingThrowCatch : ZIOApp<Unit, int>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
-        static ZIO<int> MyProgram = 
+        static ZIO<Unit, int> MyProgram = 
             ZIO
                 .Succeed<Unit>(() => throw new Exception("Failed!"))
                 .CatchAll(_ => WriteLine("This should never be shown"))
@@ -467,67 +472,67 @@ namespace Zio
                     _ => ZIO.Succeed(() => 0)
                 );
 
-        public ZIO<int> Run() => MyProgram;
+        public ZIO<Unit, int> Run() => MyProgram;
     }
 
-    class ZipRight : ZIOApp<Unit>
+    class ZipRight : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             from _ in WriteLine("Howdy!")
                 .ZipRight(WriteLine("From"))
                 .ZipRight(WriteLine("AssociativeBoth"))
             select Unit();
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class ZipRightRepeat : ZIOApp<Unit>
+    class ZipRightRepeat : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             from _ in WriteLine("Howdy!")
                 .Repeat(10000)
             select Unit();
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class Forever : ZIOApp<Unit>
+    class Forever : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine(message);
             return Unit();
         });
 
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             from _ in WriteLine("Howdy!")
                 .Forever()
             select Unit();
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class Interruption : ZIOApp<Unit>
+    class Interruption : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} {message}");
             return Unit();
         });
 
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             from fiber in WriteLine("Howdy!")
                 .Forever()
                 .Ensuring(WriteLine("Goodbye"))
@@ -540,18 +545,18 @@ namespace Zio
             from _ in fiber.Interrupt()
             select Unit();
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
     }
 
-    class Uninterruptible : ZIOApp<Unit>
+    class Uninterruptible : ZIOApp<Unit, Unit>
     {
-        static ZIO<Unit> WriteLine(string message) => ZIO.Succeed(() => 
+        static ZIO<Unit, Unit> WriteLine(string message) => ZIO.Succeed(() => 
         {
             Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} {message}");
             return Unit();
         });
 
-        static ZIO<Unit> MyProgram = 
+        static ZIO<Unit, Unit> MyProgram = 
             from fiber in WriteLine("Howdy!")
                 .Repeat(10000)
                 .Uninterruptible()
@@ -566,6 +571,57 @@ namespace Zio
             from _ in fiber.Interrupt()
             select Unit();
 
-        public ZIO<Unit> Run() => MyProgram;
+        public ZIO<Unit, Unit> Run() => MyProgram;
+    }
+
+    public interface IFoo
+    {
+        int foo() => 1;
+    }
+    public interface IBar
+    {
+        string bar() => "bar";
+    }
+    public class Env : IFoo, IBar {}
+
+    class Environment : ZIOApp<int, int>
+    {
+        static ZIO<R, Unit> WriteLine<R>(string message) => ZIO.Succeed<R, Unit>(() => 
+        {
+            Console.WriteLine($"{Thread.CurrentThread.ManagedThreadId} {message}");
+            return Unit();
+        });
+
+        static ZIO<Env, Unit> zio = 
+            ZIO.AccessZIO<Env, Unit>(n => WriteLine<Env>($"{(n as IFoo).foo()}"));
+
+        static ZIO<Env, Unit> zio2 = 
+            zio.Provide(new Env());
+
+        static ZIO<Env, Unit> zio3 = 
+            ZIO.AccessZIO<Env, Unit>(n => WriteLine<Env>($"{(n as IBar).bar()}"));
+
+        static ZIO<Env, (Unit, Unit)> zio4 = 
+            zio2.Zip(zio3);
+
+        static ZIO<int, Unit> zio5 = 
+            ZIO.AccessZIO<int, Unit>(n => WriteLine<int>($"{n}"));
+
+        static ZIO<int, int> potentiallyScary = 
+            from x in ZIO.Environment<int>()
+            from _ in zio5.Provide(42)
+            from y in ZIO.Environment<int>()
+            select x + y;
+
+        static ZIO<int, int> potentiallyScarier = 
+            from x in ZIO.Environment<int>()
+            from _ in (zio5.ZipRight(ZIO.Fail<int, Unit>(() => new Exception("OH NO")))
+                .Provide(42)
+                .CatchAll(_ => ZIO.Succeed<int, Unit>(() => Unit())))
+            from y in ZIO.Environment<int>()
+            select x + y;
+
+        public ZIO<int, int> Run() => 
+            potentiallyScarier.Provide(100);
     }
 }
